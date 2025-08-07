@@ -1,25 +1,28 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 
 const DATA_FILE: &'static str = "./data/data.csv";
+const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 8;
 const SEED: u64 = 10;
 
 fn main() {
     // get the data in form of cell and locus
-    let all_cell_data = data_loader();
+    let (all_cell_data, cell_ids) = data_loader();
     // check
     assert!(all_cell_data.last().unwrap().read_counts.len() == all_cell_data.first().unwrap().gene_count);
     let gene_count = all_cell_data[0].gene_count;
     // initialize the cluster centers randomly, for now
     let mut cluster_centers = init_cluster_centers_uniform(gene_count, K);
     // do em with poisson
-    em(gene_count, &mut cluster_centers, &all_cell_data);
+    let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
+    // write stuff
+    data_writer(cell_ids, log_loss_final);
 }
 
-fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
     let num_clusters = K;
@@ -35,7 +38,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         }
     }
     // run 10 times and see
-    for run in 0..10 {
+    for run in 0..2 {
         let mut log_poisson_total = 0.0;
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob);
@@ -61,6 +64,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         }
         println!("Assignment vec {:?}", assigned_vec);
     }
+    log_loss_final
 }
 
 fn update_cluster_centers(gene_count: usize, update_prob: &Vec<Vec<f32>>, cluster_centers: &mut Vec<Vec<f32>>) {
@@ -139,17 +143,22 @@ fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize) -> Vec<V
     centers
 }
 
-fn data_loader() -> Vec<CellData> {
+fn data_loader() -> (Vec<CellData>, Vec<String>) {
     println!("Start Data Loading");
     let data_file = File::open(DATA_FILE).expect("cannot open data file");
     let data_reader = BufReader::new(data_file);
     let mut all_cell_data= vec![];
+    let mut cell_ids = vec![];
     for (line_index, line) in data_reader.lines().enumerate() {
         let line = line.unwrap();
         let values: Vec<&str> = line.split(',').collect();
         if line_index == 0 {
             // this is the header, make new cell vector
             all_cell_data = vec![CellData::new(); values.len()];
+            // save the values in a vector, cell id_fov_etc
+            for value in values {
+                cell_ids.push(value.trim().to_string());
+            }
             continue;
         }
         for (cell_index, value) in values.iter().enumerate() {
@@ -160,7 +169,16 @@ fn data_loader() -> Vec<CellData> {
         }
     }
     println!("End Data Loading");
-    all_cell_data
+    (all_cell_data, cell_ids)
+}
+
+fn data_writer(cell_ids: Vec<String>, log_loss_final: Vec<Vec<f32>>) {
+    // write to file
+    let mut file = File::create(OUT_FILE).unwrap();
+    for (cell_id, log_loss) in cell_ids.iter().zip(log_loss_final.iter()) {
+        let index_of_max: usize = log_loss.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
+        writeln!(file, "{}\t{}\t{:?}", cell_id, index_of_max, log_loss).expect("result file cannot be written");
+    }
 }
 
 #[derive(Clone)]
