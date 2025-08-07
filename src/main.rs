@@ -38,7 +38,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         }
     }
     // run 10 times and see
-    for run in 0..2 {
+    for run in 0..10 {
         let mut log_poisson_total = 0.0;
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob);
@@ -181,6 +181,23 @@ fn data_writer(cell_ids: Vec<String>, log_loss_final: Vec<Vec<f32>>) {
     }
 }
 
+fn data_simulator () {
+    // initializations
+    let number_of_genes = 10;
+    let number_of_clusters = 2;
+    let number_of_cells = 100;
+    // random assignment of lambda for cluster for gene
+    let lambda_vec: Vec<Vec<usize>> = vec![vec![]; number_of_clusters];
+    let mut rng = StdRng::seed_from_u64(SEED);
+    for (index_1, gene) in (0..number_of_genes).enumerate() {
+        for (index_2, cluster) in (0..number_of_clusters).enumerate() {
+            //lambda_vec.push();
+        }
+    }
+    
+    // draw from each distribution and populate the celldata
+
+}
 #[derive(Clone)]
 struct CellData {
     read_counts: Vec<u16>,
