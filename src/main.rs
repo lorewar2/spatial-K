@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand_distr::{Poisson, Distribution};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
@@ -9,17 +10,18 @@ const K: usize = 8;
 const SEED: u64 = 10;
 
 fn main() {
+    let all_cell_data = data_simulator();
     // get the data in form of cell and locus
-    let (all_cell_data, cell_ids) = data_loader();
+    //let (all_cell_data, cell_ids) = data_loader();
     // check
-    assert!(all_cell_data.last().unwrap().read_counts.len() == all_cell_data.first().unwrap().gene_count);
-    let gene_count = all_cell_data[0].gene_count;
+    //assert!(all_cell_data.last().unwrap().read_counts.len() == all_cell_data.first().unwrap().gene_count);
+    //let gene_count = all_cell_data[0].gene_count;
     // initialize the cluster centers randomly, for now
     let mut cluster_centers = init_cluster_centers_uniform(gene_count, K);
     // do em with poisson
-    let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
+    //let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
     // write stuff
-    data_writer(cell_ids, log_loss_final);
+    //data_writer(cell_ids, log_loss_final);
 }
 
 fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
@@ -181,23 +183,55 @@ fn data_writer(cell_ids: Vec<String>, log_loss_final: Vec<Vec<f32>>) {
     }
 }
 
-fn data_simulator () {
+
+fn data_simulator () -> Vec<Vec<f32>> {
     // initializations
-    let number_of_genes = 10;
+    let number_of_genes = 3;
     let number_of_clusters = 2;
-    let number_of_cells = 100;
+    let number_of_cells = 10;
     // random assignment of lambda for cluster for gene
-    let lambda_vec: Vec<Vec<usize>> = vec![vec![]; number_of_clusters];
+    let mut lambda_vec: Vec<Vec<usize>> = vec![vec![]; number_of_clusters];
+    // convert this to all cell data
+    let mut data_vec: Vec<Vec<f32>> = vec![vec![0.0; number_of_genes]; number_of_cells];
+    let mut cluster_assignment: Vec<usize> = vec![];
     let mut rng = StdRng::seed_from_u64(SEED);
-    for (index_1, gene) in (0..number_of_genes).enumerate() {
-        for (index_2, cluster) in (0..number_of_clusters).enumerate() {
-            //lambda_vec.push();
+
+    // assign a random cluster for each cell
+    for cell in 0..number_of_cells {
+        cluster_assignment.push(rng.gen_range(0..number_of_clusters));
+    }
+
+    for cluster in 0..number_of_clusters {
+        for gene in 0..number_of_genes {
+            let generated_lamda = rng.gen_range(0..100);
+            lambda_vec[cluster].push(generated_lamda);
+            // draw from each distribution and populate the celldata
+            let poisson = Poisson::new(generated_lamda as f32).unwrap();
+            for cell in 0..number_of_cells {
+                // if this cluster generate data for gene
+                if cluster_assignment[cell] == cluster {
+                    let sample_data: f32 = poisson.sample(&mut rng);
+                    data_vec[cell][gene] = sample_data;
+                }   
+            }
         }
     }
-    
-    // draw from each distribution and populate the celldata
-
+    // print stuff
+    for cluster in 0..number_of_clusters {
+        println!("!!!!!!!! CLUSTER  {}", cluster);
+        println!("lamda vector {:?}", lambda_vec[cluster]);
+        for cell in 0..number_of_cells {
+            if cluster_assignment[cell] == cluster {
+                print!("cell number {}", cell);
+                print!(" {:?}", data_vec[cell]);
+                println!("");
+            }
+        }
+    }
+    println!("{:?}", data_vec);
+    data_vec
 }
+
 #[derive(Clone)]
 struct CellData {
     read_counts: Vec<u16>,
