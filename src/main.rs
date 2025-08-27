@@ -1,45 +1,30 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::thread::sleep;
-use std::time::Duration;
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 2;
+const K: usize = 3;
+const GENE_NUM_SIM: usize = 10;
+const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 12;
-const THREAD_NUM: usize = 64;
 
 fn main() {
     let (all_cell_data, ground_truth) = data_simulator(1);
-    // get the data in form of cell and locus
     //let (all_cell_data, cell_ids) = data_loader();
-    // check
-    //assert!(all_cell_data.last().unwrap().read_counts.len() == all_cell_data.first().unwrap().gene_count);
-    // first run for different alpha, then seeds
-    for seed in 0..10 {
-        for alpha_plus in 1..10 {
-            let delta = 1;
-            let alpha = 0.1 + (delta as f32 * alpha_plus as f32);
-            let thread_num = seed as usize * 100 + alpha_plus as usize;
-            let gene_count = all_cell_data[0].gene_count;
-            // initialize the cluster centers randomly, for now
-            let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
-            
-            //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K);
-            // do em with poisson
-            let log_loss_final = em(thread_num, gene_count, &mut cluster_centers, &all_cell_data, &ground_truth, seed);
-            // write separate function for results // to do
-        }
-    }
-    
-    // write stuff
-    //data_writer(cell_ids, log_loss_final);
+    let seed = SEED;
+    let alpha = 1.0;
+    let gene_count = all_cell_data[0].gene_count;
+    // initialize the cluster centers gamma
+    let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
+    let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
+    result_display(&log_loss_final, &ground_truth);
 }
 
-fn em(thread_num: usize, gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>, ground_truth: &Vec<usize>, seed: u64) -> Vec<Vec<f32>> {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
+    println!("Starting cc {:?}", cluster_centers);
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
     let num_clusters = K;
@@ -69,12 +54,12 @@ fn em(thread_num: usize, gene_count: usize, mut cluster_centers: &mut Vec<Vec<f3
             // update the temp probs
             update_update_prob(&mut update_prob, cell, &log_poisson, cell_count);
         }
-        //println!("BEFORE UPDATE CC {:?}", cluster_centers);
+        println!("BEFORE UPDATE CC {:?}", cluster_centers);
         update_cluster_centers(gene_count, &update_prob, &mut cluster_centers);
         // display stuff
         let log_loss_change = log_poisson_total - last_log_loss;
         last_log_loss = log_poisson_total;
-        //println!("poisson\t{}\t{}\t{}", run, log_poisson_total, log_loss_change);
+        println!("poisson\t{}\t{}\t{}", run, log_poisson_total, log_loss_change);
         // check the cluster assignment
         let mut assigned_vec: Vec<usize> = vec![0; num_clusters];
         for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
@@ -82,19 +67,9 @@ fn em(thread_num: usize, gene_count: usize, mut cluster_centers: &mut Vec<Vec<f3
             assigned_vec[index_of_max] += 1;
             //println!("cell {} assigned {}", index, index_of_max);
         }
-        //println!("AFTER UPDATE CC {:?}", cluster_centers);
-        //println!("Assignment vec {:?}\n", assigned_vec);
+        println!("AFTER UPDATE CC {:?}", cluster_centers);
+        println!("Assignment vec {:?}\n", assigned_vec);
     }
-    // print result
-    let mut method_assignment = vec![];
-    for (index, final_log_probability) in log_loss_final.iter().enumerate() {
-        let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
-        //println!("cell {} assigned {}", index, index_of_max);
-        method_assignment.push(index_of_max);
-    }
-    //sleep(Duration::from_secs(2));
-    let rand_index = rand_index_calculator(&method_assignment, ground_truth);
-    println!("Thread {} rand Index {}", thread_num, rand_index);
     log_loss_final
 }
 
@@ -114,7 +89,7 @@ fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_pois
         let sum = log_sum_exp(log_poisson);
         for (cluster, probability) in log_poisson.iter().enumerate() {
             // normalize and turn log to normal
-            let update_prob_exp = (probability - sum).exp() / cell_count as f32;
+            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 2.0);
             //println!("{}", update_prob_exp);
             update_prob[cluster][locus] += update_prob_exp * (cell.read_counts[locus] as f32);
         }
@@ -163,7 +138,7 @@ fn reset_update_prob(num_clusters: usize, gene_count: usize, update_prob: &mut V
     }
 }
 
-fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize) -> Vec<Vec<f32>> {
+fn _init_cluster_centers_uniform(gene_count: usize, num_clusters: usize) -> Vec<Vec<f32>> {
     let mut rng = StdRng::seed_from_u64(SEED);
     // Generate random numbers using the seeded RNG
     let mut centers: Vec<Vec<f32>> = Vec::new();
@@ -196,7 +171,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
     }
     //println!("{:?}", means);
     // using means in gamma draw values for clusters
-    println!("aplha {}", alpha);
+    println!("alpha {}", alpha);
     for mean in means {
         let theta = mean / alpha;
         let gamma = Gamma::new(alpha, theta).expect("invalid");
@@ -250,9 +225,10 @@ fn data_writer(cell_ids: Vec<String>, log_loss_final: Vec<Vec<f32>>) {
 
 fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
     // initializations
-    let number_of_genes = 2;
-    let number_of_clusters = 2;
-    let number_of_cells = 10;
+    let number_of_genes = GENE_NUM_SIM;
+    let number_of_cells = CELL_NUM_SIM;
+    let number_of_clusters = K;
+    
     // random assignment of lambda for cluster for gene
     let mut lambda_vec: Vec<Vec<usize>> = vec![vec![]; number_of_clusters];
     // convert this to all cell data
@@ -261,7 +237,7 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
     let mut rng = StdRng::seed_from_u64(seed);
 
     // assign a random cluster for each cell
-    for cell in 0..number_of_cells {
+    for _cell in 0..number_of_cells {
         cluster_assignment.push(rng.gen_range(0..number_of_clusters));
     }
 
@@ -293,6 +269,19 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
         }
     }
     (data_vec, cluster_assignment)
+}
+
+
+fn result_display(log_loss_final: &Vec<Vec<f32>>, ground_truth: &Vec<usize>) {
+    let mut method_assignment = vec![];
+    for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
+        let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
+        //println!("cell {} assigned {}", index, index_of_max);
+        method_assignment.push(index_of_max);
+    }
+    //sleep(Duration::from_secs(2));
+    let rand_index = rand_index_calculator(&method_assignment, ground_truth);
+    println!("Rand Index {}", rand_index);
 }
 
 fn rand_index_calculator (predicted: &Vec<usize>, ground_truth: &Vec<usize>) -> f64 {
