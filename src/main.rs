@@ -6,16 +6,16 @@ use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 3;
+const K: usize = 2;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 12;
 
 fn main() {
-    let (all_cell_data, ground_truth) = data_simulator(1);
+    let (all_cell_data, ground_truth) = data_simulator(SEED);
     //let (all_cell_data, cell_ids) = data_loader();
     let seed = SEED;
-    let alpha = 1.0;
+    let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // initialize the cluster centers gamma
     let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
