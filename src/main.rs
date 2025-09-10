@@ -6,14 +6,14 @@ use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 4;
+const K: usize = 5;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 12;
 
 fn main() {
+    let (_all_cell_data, _ground_truth) = data_simulator(SEED);
     let (all_cell_data, cell_ids) = data_loader();
-    //let (all_cell_data, ground_truth) = data_simulator(SEED);
     let seed = SEED;
     let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
@@ -160,7 +160,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
     let mut centers: Vec<Vec<f32>> = vec![vec![]; num_clusters];
     let mut rng = StdRng::seed_from_u64(seed);
     let mut read_counts_gene = vec![vec![]; gene_count];
-    let mut total_cells = all_cell_data.len();
+    //let mut total_cells = all_cell_data.len();
     let mut non_zero_counts = vec![0; gene_count];
     let mut read_counts_gene_sum = vec![0; gene_count];
     let mut means = vec![];
@@ -176,7 +176,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
     }
     //println!("{:?}", read_counts_gene);
     // calculate mean per gene
-    for (index, read_count) in read_counts_gene.iter().enumerate() {
+    for (_index, read_count) in read_counts_gene.iter().enumerate() {
         if read_count.len() > 0 {
             let mut temp = read_count.clone();
             temp.sort();
@@ -224,9 +224,8 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
             }
             continue;
         }
-        let mut save_this = false;
         let mut gene_expressed_by_cells = 0;
-        for (cell_index, value) in values.iter().enumerate() {
+        for (_cell_index, value) in values.iter().enumerate() {
             // convert to u32 and add to cell data
             let read_count = value.to_string().parse::<u16>().unwrap();
             if read_count > 0 {
@@ -241,8 +240,7 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
                 all_cell_data[cell_index].read_counts.push(read_count);
                 all_cell_data[cell_index].gene_count = all_cell_data[cell_index].gene_count + 1;
             }
-        }
-        
+        }  
     }
     // sort the all data based on one gene entry just to see
     // let mut all_sorted = vec![];
@@ -293,7 +291,7 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
     let mut rng = StdRng::seed_from_u64(seed);
 
     // assign a 90 % of the genes of a cluster 0 reads
-    for cluster in 0..number_of_clusters {
+    for _cluster in 0..number_of_clusters {
         let mut gene_non_zero = vec![];
         for gene in 0..number_of_genes {
             if rng.gen_bool(gene_non_zero_prob) {
@@ -345,7 +343,7 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
 }
 
 
-fn result_display(log_loss_final: &Vec<Vec<f32>>, ground_truth: &Vec<usize>) {
+fn _result_display(log_loss_final: &Vec<Vec<f32>>, ground_truth: &Vec<usize>) {
     let mut method_assignment = vec![];
     for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
         let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
@@ -353,11 +351,11 @@ fn result_display(log_loss_final: &Vec<Vec<f32>>, ground_truth: &Vec<usize>) {
         method_assignment.push(index_of_max);
     }
     //sleep(Duration::from_secs(2));
-    let rand_index = rand_index_calculator(&method_assignment, ground_truth);
+    let rand_index = _rand_index_calculator(&method_assignment, ground_truth);
     println!("Rand Index {}", rand_index);
 }
 
-fn rand_index_calculator (predicted: &Vec<usize>, ground_truth: &Vec<usize>) -> f64 {
+fn _rand_index_calculator (predicted: &Vec<usize>, ground_truth: &Vec<usize>) -> f64 {
     assert_eq!(ground_truth.len(), predicted.len());
     let n = ground_truth.len();
 
