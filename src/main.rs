@@ -228,14 +228,27 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
     let number_of_genes = GENE_NUM_SIM;
     let number_of_cells = CELL_NUM_SIM;
     let number_of_clusters = K;
+    let gene_non_zero_prob = 0.2;
     
     // random assignment of lambda for cluster for gene
     let mut lambda_vec: Vec<Vec<usize>> = vec![vec![]; number_of_clusters];
     // convert this to all cell data
     let mut data_vec: Vec<CellData> = vec![CellData::new(number_of_genes); number_of_cells];
     let mut cluster_assignment: Vec<usize> = vec![];
+    let mut gene_non_zero_cluster = vec![];
     let mut rng = StdRng::seed_from_u64(seed);
 
+    // assign a 90 % of the genes of a cluster 0 reads
+    for cluster in 0..number_of_clusters {
+        let mut gene_non_zero = vec![];
+        for gene in 0..number_of_genes {
+            if rng.gen_bool(gene_non_zero_prob) {
+                gene_non_zero.push(gene);
+            }
+        }
+        gene_non_zero_cluster.push(gene_non_zero);
+    }
+    //println!("{:?}", gene_non_zero_cluster);
     // assign a random cluster for each cell
     for _cell in 0..number_of_cells {
         cluster_assignment.push(rng.gen_range(0..number_of_clusters));
@@ -247,6 +260,12 @@ fn data_simulator (seed: u64) -> (Vec<CellData>, Vec<usize>) {
             lambda_vec[cluster].push(generated_lamda);
             // draw from each distribution and populate the celldata
             let poisson = Poisson::new(generated_lamda as f32).unwrap();
+            if gene_non_zero_cluster[cluster].contains(&gene) {
+
+            }
+            else {
+                continue;
+            }
             for cell in 0..number_of_cells {
                 // if this cluster generate data for gene
                 if cluster_assignment[cell] == cluster {
