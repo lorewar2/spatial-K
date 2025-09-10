@@ -6,21 +6,22 @@ use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 2;
+const K: usize = 4;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 12;
 
 fn main() {
-    let (all_cell_data, ground_truth) = data_simulator(SEED);
-    //let (all_cell_data, cell_ids) = data_loader();
+    let (all_cell_data, cell_ids) = data_loader();
+    //let (all_cell_data, ground_truth) = data_simulator(SEED);
     let seed = SEED;
     let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // initialize the cluster centers gamma
     let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
     let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
-    result_display(&log_loss_final, &ground_truth);
+    //result_display(&log_loss_final, &ground_truth);
+    data_writer(cell_ids, log_loss_final);
 }
 
 fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
@@ -41,7 +42,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         }
     }
     // run 10 times and see
-    for run in 0..10 {
+    for run in 0..30 {
         let mut log_poisson_total = 0.0;
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob);
@@ -54,7 +55,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
             // update the temp probs
             update_update_prob(&mut update_prob, cell, &log_poisson, cell_count);
         }
-        println!("BEFORE UPDATE CC {:?}", cluster_centers);
+        //println!("BEFORE UPDATE CC {:?}", cluster_centers);
         update_cluster_centers(gene_count, &update_prob, &mut cluster_centers);
         // display stuff
         let log_loss_change = log_poisson_total - last_log_loss;
@@ -67,7 +68,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
             assigned_vec[index_of_max] += 1;
             //println!("cell {} assigned {}", index, index_of_max);
         }
-        println!("AFTER UPDATE CC {:?}", cluster_centers);
+        //println!("AFTER UPDATE CC {:?}", cluster_centers);
         println!("Assignment vec {:?}\n", assigned_vec);
     }
     log_loss_final
@@ -89,7 +90,7 @@ fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_pois
         let sum = log_sum_exp(log_poisson);
         for (cluster, probability) in log_poisson.iter().enumerate() {
             // normalize and turn log to normal
-            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 2.0);
+            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 3.0);
             //println!("{}", update_prob_exp);
             update_prob[cluster][locus] += update_prob_exp * (cell.read_counts[locus] as f32);
         }
@@ -104,11 +105,14 @@ fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_prior: f32
             //log(P)=-λ+x​log(λ​)-log(x​!)
             //x = read count 
             //λ = center[gene_index]
-            let mod_read_count = *read_count;
+            let mut mod_read_count = *read_count;
+            if mod_read_count > 40 {
+                mod_read_count = 40;
+            }
             //println!("read {}", mod_read_count);
             //println!("fact {} others {}", (factorial(mod_read_count) as f32).ln(), - center[gene_index] + mod_read_count as f32 * center[gene_index].ln());
             let value = - center[gene_index] + mod_read_count as f32 * center[gene_index].ln();
-            let factorial = (factorial(mod_read_count) as f32).ln();
+            let factorial = (factorial(mod_read_count) as f32 + 0.000000001).ln();
             log_probabilities[cluster] += value - factorial;
         }
     }
@@ -155,19 +159,36 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
     // initialize values
     let mut centers: Vec<Vec<f32>> = vec![vec![]; num_clusters];
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut read_counts_gene = vec![0; gene_count];
+    let mut read_counts_gene = vec![vec![]; gene_count];
+    let mut total_cells = all_cell_data.len();
+    let mut non_zero_counts = vec![0; gene_count];
+    let mut read_counts_gene_sum = vec![0; gene_count];
     let mut means = vec![];
-    let cell_count = all_cell_data.len() as f32;
     //println!("{}", cell_count);
     for cell_data in all_cell_data {
         for (index, value) in cell_data.read_counts.iter().enumerate() {
-            read_counts_gene[index] += *value as usize;
+            if value != &0 {
+                read_counts_gene[index].push(*value as usize);
+                read_counts_gene_sum[index] += *value as usize;
+                non_zero_counts[index] += 1;
+            }
         }
     }
     //println!("{:?}", read_counts_gene);
     // calculate mean per gene
-    for read_count in read_counts_gene {
-        means.push((read_count as f32 + 0.0000001) /  cell_count);
+    for (index, read_count) in read_counts_gene.iter().enumerate() {
+        if read_count.len() > 0 {
+            let mut temp = read_count.clone();
+            temp.sort();
+            // println!("Gene num: {}", index);
+            // println!("Total_entries: {} Non_zero_entries: {} Zero_entries: {} ", total_cells, temp.len(), total_cells - temp.len());
+            // println!("Max: {} Min: {} Median: {} Mean (Non zero): {} Mean (Zero): {}", temp[temp.len() - 1], temp[0], temp[temp.len() / 2], read_counts_gene_sum[index] as f32 / non_zero_counts[index] as f32, read_counts_gene_sum[index] as f32 / total_cells as f32);
+            // println!("top: {} {} {} {} bottom (non zero): {} {} {} {}", temp[temp.len() - 1], temp[temp.len() - 2], temp[temp.len() - 3], temp[temp.len() - 4], temp[0], temp[1], temp[2], temp[3]);
+            means.push(temp[temp.len() / 2] as f32);
+        }
+        else {
+            means.push(0.0000001);
+        }
     }
     //println!("{:?}", means);
     // using means in gamma draw values for clusters
@@ -203,13 +224,46 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
             }
             continue;
         }
+        let mut save_this = false;
+        let mut gene_expressed_by_cells = 0;
         for (cell_index, value) in values.iter().enumerate() {
             // convert to u32 and add to cell data
             let read_count = value.to_string().parse::<u16>().unwrap();
-            all_cell_data[cell_index].read_counts.push(read_count);
-            all_cell_data[cell_index].gene_count = line_index;
+            if read_count > 0 {
+                gene_expressed_by_cells += 1;
+            }
         }
+        if gene_expressed_by_cells > 5000 {
+            println!("gene {} passed", line_index);
+            for (cell_index, value) in values.iter().enumerate() {
+                // convert to u32 and add to cell data
+                let read_count = value.to_string().parse::<u16>().unwrap();
+                all_cell_data[cell_index].read_counts.push(read_count);
+                all_cell_data[cell_index].gene_count = all_cell_data[cell_index].gene_count + 1;
+            }
+        }
+        
     }
+    // sort the all data based on one gene entry just to see
+    // let mut all_sorted = vec![];
+    // let mut indices: Vec<usize> = (0..all_cell_data[0].read_counts.len()).collect();
+    
+    // indices.sort_by_key(|&i| all_cell_data[0].read_counts[i]);
+    // indices.reverse();
+    // for index in 0..all_cell_data.len() {
+    //     let sorted: Vec<_> = indices.iter().map(|&i| all_cell_data[index].read_counts[i]).collect();
+    //     if sorted[0] > 0 && sorted[5] > 0 && sorted[10] > 0 {
+    //         for index_2 in 0..10 {
+    //             print!("{} ", sorted[index_2]);
+    //         }
+    //         println!("");
+    //     }
+        
+    //     //println!("{:?}", sorted[0..10]);
+    //     all_sorted.push(sorted);
+    // }
+
+
     println!("End Data Loading");
     (all_cell_data, cell_ids)
 }
