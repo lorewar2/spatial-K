@@ -6,18 +6,19 @@ use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 5;
+const K: usize = 3;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
-const SEED: u64 = 12;
+const SEED: u64 = 25;
 
 fn main() {
-    let (_all_cell_data, _ground_truth) = data_simulator(SEED);
+    //let (_all_cell_data, _ground_truth) = data_simulator(SEED);
     let (all_cell_data, cell_ids) = data_loader();
     let seed = SEED;
     let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // initialize the cluster centers gamma
+    //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
     let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
     let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
     //result_display(&log_loss_final, &ground_truth);
@@ -38,7 +39,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
     for cluster in 0..num_clusters {
         update_prob.push(Vec::new());
         for _index in 0..gene_count {
-            update_prob[cluster].push(0.0001);
+            update_prob[cluster].push(0.000000001);
         }
     }
     // run 10 times and see
@@ -90,7 +91,7 @@ fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_pois
         let sum = log_sum_exp(log_poisson);
         for (cluster, probability) in log_poisson.iter().enumerate() {
             // normalize and turn log to normal
-            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 3.0);
+            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 2.9);
             //println!("{}", update_prob_exp);
             update_prob[cluster][locus] += update_prob_exp * (cell.read_counts[locus] as f32);
         }
@@ -106,8 +107,9 @@ fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_prior: f32
             //x = read count 
             //λ = center[gene_index]
             let mut mod_read_count = *read_count;
-            if mod_read_count > 40 {
-                mod_read_count = 40;
+
+            if mod_read_count > 100 {
+                mod_read_count = 100;
             }
             //println!("read {}", mod_read_count);
             //println!("fact {} others {}", (factorial(mod_read_count) as f32).ln(), - center[gene_index] + mod_read_count as f32 * center[gene_index].ln());
@@ -142,14 +144,14 @@ fn reset_update_prob(num_clusters: usize, gene_count: usize, update_prob: &mut V
     }
 }
 
-fn _init_cluster_centers_uniform(gene_count: usize, num_clusters: usize) -> Vec<Vec<f32>> {
-    let mut rng = StdRng::seed_from_u64(SEED);
+fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize, seed: u64) -> Vec<Vec<f32>> {
+    let mut rng = StdRng::seed_from_u64(seed as u64);
     // Generate random numbers using the seeded RNG
     let mut centers: Vec<Vec<f32>> = Vec::new();
     for cluster in 0..num_clusters {
         centers.push(Vec::new());
         for _ in 0..gene_count {
-            centers[cluster].push(rng.gen::<f32>().min(0.9999).max(0.0001));
+            centers[cluster].push((rng.gen::<f32>() * 10.0).min(10.0).max(0.0001));
         }
     }
     centers
@@ -228,7 +230,7 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
         for (_cell_index, value) in values.iter().enumerate() {
             // convert to u32 and add to cell data
             let read_count = value.to_string().parse::<u16>().unwrap();
-            if read_count > 0 {
+            if read_count > 1 {
                 gene_expressed_by_cells += 1;
             }
         }
