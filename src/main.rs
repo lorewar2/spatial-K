@@ -232,7 +232,7 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
                 gene_expressed_by_cells += 1;
             }
         }
-        if gene_expressed_by_cells > 5000 {
+        if gene_expressed_by_cells > 3000 {
             println!("gene {} passed", line_index);
             for (cell_index, value) in values.iter().enumerate() {
                 // convert to u32 and add to cell data
