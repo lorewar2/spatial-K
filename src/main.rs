@@ -1,10 +1,11 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Seek, Write};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
+const DATA_FILE_2: &'static str = "./data/dense.csv";
 const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 3;
 const GENE_NUM_SIM: usize = 10;
@@ -12,17 +13,18 @@ const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 25;
 
 fn main() {
+    data_loader_scrna();
     //let (_all_cell_data, _ground_truth) = data_simulator(SEED);
-    let (all_cell_data, cell_ids) = data_loader();
-    let seed = SEED;
-    let alpha = 4.5;
-    let gene_count = all_cell_data[0].gene_count;
-    // initialize the cluster centers gamma
-    //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
-    let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
-    let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
-    //result_display(&log_loss_final, &ground_truth);
-    data_writer(cell_ids, log_loss_final);
+    // let (all_cell_data, cell_ids) = data_loader_spatial();
+    // let seed = SEED;
+    // let alpha = 4.5;
+    // let gene_count = all_cell_data[0].gene_count;
+    // // initialize the cluster centers gamma
+    // //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
+    // let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
+    // let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
+    // //result_display(&log_loss_final, &ground_truth);
+    // data_writer(cell_ids, log_loss_final);
 }
 
 fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
@@ -208,7 +210,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
     //vec![vec![11.0, 24.0], vec![43.0, 25.0]]
 }
 
-fn data_loader() -> (Vec<CellData>, Vec<String>) {
+fn data_loader_spatial() -> (Vec<CellData>, Vec<String>) {
     println!("Start Data Loading");
     let data_file = File::open(DATA_FILE).expect("cannot open data file");
     let data_reader = BufReader::new(data_file);
@@ -266,6 +268,72 @@ fn data_loader() -> (Vec<CellData>, Vec<String>) {
 
     println!("End Data Loading");
     (all_cell_data, cell_ids)
+}
+
+fn data_loader_scrna() {
+    println!("Start Data Loading");
+    let data_file = File::open(DATA_FILE_2).expect("cannot open data file");
+    let mut data_reader = BufReader::new(&data_file);
+    let mut all_cell_data= vec![];
+    let mut gene_expressed_by_cells = vec![];
+    for (line_index, line) in data_reader.lines().enumerate() {
+        let line = line.unwrap();
+        let values: Vec<&str> = line.split(',').collect();
+        //all_cell_data.push(CellData::new(values.len()));
+        if line_index == 0 {
+            gene_expressed_by_cells = vec![0; values.len()];
+        }
+        for (gene_index, value) in values.iter().enumerate() {
+            let read_count = (value.to_string().parse::<f32>().unwrap() * 10.0) as u16;
+            if read_count > 1 {
+                gene_expressed_by_cells[gene_index] += 1;
+            }
+        }
+    }
+    gene_expressed_by_cells.sort();
+    println!("{}", gene_expressed_by_cells.len());
+    println!("{}", gene_expressed_by_cells[gene_expressed_by_cells.len() / 2]);
+    println!("{}", gene_expressed_by_cells[gene_expressed_by_cells.len() - 1]);
+    let mut count = 0;
+    for gene in gene_expressed_by_cells {
+        if gene > 30000 {  
+            count += 1;
+        }
+    }
+    println!("count {}", count);
+    
+    let mut data_reader = BufReader::new(&data_file);
+    for (line_index, line) in data_reader.lines().enumerate() {
+        let line = line.unwrap();
+        let values: Vec<&str> = line.split(',').collect();
+        all_cell_data.push(CellData::new(values.len()));
+        for (gene_index, value) in values.iter().enumerate() {
+            // convert to u32 and add to cell data
+            //let read_count = (value.to_string().parse::<f32>().unwrap() * 10.0) as u16;
+            //all_cell_data[line_index].read_counts.push(read_count);
+        }
+    }
+    // sort the all data based on one gene entry just to see
+    // let mut all_sorted = vec![];
+    // let mut indices: Vec<usize> = (0..all_cell_data[0].read_counts.len()).collect();
+    
+    // indices.sort_by_key(|&i| all_cell_data[0].read_counts[i]);
+    // indices.reverse();
+    // for index in 0..all_cell_data.len() {
+    //     let sorted: Vec<_> = indices.iter().map(|&i| all_cell_data[index].read_counts[i]).collect();
+    //     if sorted[0] > 0 && sorted[5] > 0 && sorted[10] > 0 {
+    //         for index_2 in 0..10 {
+    //             print!("{} ", sorted[index_2]);
+    //         }
+    //         println!("");
+    //     }
+        
+    //     //println!("{:?}", sorted[0..10]);
+    //     all_sorted.push(sorted);
+    // }
+
+
+    println!("End Data Loading");
 }
 
 fn data_writer(cell_ids: Vec<String>, log_loss_final: Vec<Vec<f32>>) {
