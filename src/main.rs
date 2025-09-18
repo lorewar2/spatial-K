@@ -10,18 +10,18 @@ const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 3;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
-const SEED: u64 = 1;
+const SEED: u64 = 2;
 
 fn main() {
     let all_cell_data = data_loader_scrna();
     //let (_all_cell_data, _ground_truth) = data_simulator(SEED);
     // let (all_cell_data, cell_ids) = data_loader_spatial();
     let seed = SEED;
-    // let alpha = 4.5;
+    let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // // initialize the cluster centers gamma
     let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
-    // let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
+    //let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
     let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
     // //result_display(&log_loss_final, &ground_truth);
     // data_writer(cell_ids, log_loss_final);
@@ -66,10 +66,26 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         println!("poisson\t{}\t{}\t{}", run, log_poisson_total, log_loss_change);
         // check the cluster assignment
         let mut assigned_vec: Vec<usize> = vec![0; num_clusters];
+        let mut cluster_test = vec![vec![]; 3];
         for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
             let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
             assigned_vec[index_of_max] += 1;
             //println!("cell {} assigned {}", index, index_of_max);
+            cluster_test[index_of_max].push(_index);
+        }
+        for counter in 0..10 {
+            println!("cluster 1");
+            if cluster_test[0].len() > 10 {
+                println!("{} ", cluster_test[0][counter] + 2);
+            }
+            println!("cluster 2");
+            if cluster_test[1].len() > 10 {
+                println!("{} ", cluster_test[1][counter] + 2);
+            }
+            println!("cluster 3");
+            if cluster_test[2].len() > 10 {
+                println!("{} ", cluster_test[2][counter] + 2);
+            }
         }
         //println!("AFTER UPDATE CC {:?}", cluster_centers);
         println!("Assignment vec {:?}\n", assigned_vec);
@@ -93,7 +109,7 @@ fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_pois
         let sum = log_sum_exp(log_poisson);
         for (cluster, probability) in log_poisson.iter().enumerate() {
             // normalize and turn log to normal
-            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 1.0);
+            let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 2.9);
             //println!("{}", update_prob_exp);
             update_prob[cluster][locus] += update_prob_exp * (cell.read_counts[locus] as f32);
         }
@@ -109,7 +125,7 @@ fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_prior: f32
             //x = read count 
             //λ = center[gene_index]
             let mut mod_read_count = *read_count;
-
+            //println!("mod {}", mod_read_count);
             if mod_read_count > 100 {
                 mod_read_count = 100;
             }
@@ -153,7 +169,7 @@ fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize, seed: u6
     for cluster in 0..num_clusters {
         centers.push(Vec::new());
         for _ in 0..gene_count {
-            centers[cluster].push((rng.gen::<f32>()).min(1.0).max(0.0001));
+            centers[cluster].push((rng.gen::<f32>() * 10.0).min(10.0).max(0.0001));
         }
     }
     centers
@@ -288,11 +304,15 @@ fn data_loader_scrna() -> Vec<CellData> {
                 gene_expressed_by_cells[gene_index] += 1;
             }
         }
+        if line_index > 1_000 {
+            break;
+        }
+        //println!("{}", line_index);
     }
     let mut consider_genes = vec![false; gene_expressed_by_cells.len()];
     let mut consider_genes_count = 0;
     for (index, gene) in gene_expressed_by_cells.iter().enumerate() {
-        if *gene > 10000 {  
+        if *gene > 1 {  
             consider_genes_count += 1;
             consider_genes[index] = true;
         }
@@ -323,6 +343,9 @@ fn data_loader_scrna() -> Vec<CellData> {
             }
         }
         all_cell_data.push(cell_data);
+        if line_index > 1_000 {
+            break;
+        }
     }
     // sort the all data based on one gene entry just to see
     // let mut all_sorted = vec![];
