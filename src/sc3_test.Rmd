@@ -1,0 +1,38 @@
+
+
+```{r cars}
+library(SC3)
+library(scater)
+library(SingleCellExperiment)
+library(scran)
+
+expr_t <- t(expr)  # SC3 needs genes in rows, cells in columns
+
+# Create SingleCellExperiment
+sce <- SingleCellExperiment(assays = list(exprs = as.matrix(expr_t)))
+
+rowData(sce)$feature_symbol <- rownames(sce)
+
+assay(sce, "logcounts") <- log2(mat + 1)
+
+colData(sce)$cellype_infercnv <- as.factor(NatGen2022_scRNAseq_annotations$celltype_infercnv[1:1000])
+
+sce <- sc3(sce, ks = 6, gene_filter = FALSE, biology = TRUE)  # gene_filter TRUE applies
+
+
+
+# View cluster labels (for each k)
+colData(sce)[, grep("^sc3_", colnames(colData(sce)))]
+
+# Example plots:
+# sc3_plot_consensus(sce, k = 3)
+# sc3_plot_expression(sce, k = 3)
+
+```
+
+```{r}
+
+sce <- runPCA(sce, exprs_values = "logcounts")
+plotPCA(sce, colour_by = "cellype_infercnv")
+colData(sce)[, c("cellype_infercnv", grep("^sc3_", colnames(colData(sce)), value = TRUE))]
+```
