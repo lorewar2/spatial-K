@@ -1,3 +1,5 @@
+use std::cell;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, Write};
 use rand::{Rng, SeedableRng};
@@ -6,6 +8,7 @@ use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
 const DATA_FILE_2: &'static str = "./data/dense.csv";
+const ANNO_FILE: &'static str = "./data/NatGen2022_scRNAseq_annotations.csv";
 const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 3;
 const GENE_NUM_SIM: usize = 10;
@@ -20,7 +23,8 @@ fn main() {
     let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // // initialize the cluster centers gamma
-    let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
+    //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
+    let mut cluster_centers = init_cluster_centers_optimal(gene_count, &all_cell_data);
     //let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
     let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
     // //result_display(&log_loss_final, &ground_truth);
@@ -71,22 +75,19 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
             let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
             assigned_vec[index_of_max] += 1;
             //println!("cell {} assigned {}", index, index_of_max);
-            cluster_test[index_of_max].push(_index);
+            cluster_test[index_of_max].push(all_cell_data[_index].cell_type.clone());
         }
-        for counter in 0..10 {
-            println!("cluster 1");
-            if cluster_test[0].len() > 10 {
-                println!("{} ", cluster_test[0][counter] + 2);
+        for (index, cluster) in cluster_test.iter().enumerate() {
+            println!("\nCluster {}", index);
+            let mut counts = HashMap::new();
+            for item in cluster {
+                *counts.entry(item).or_insert(0) += 1;
             }
-            println!("cluster 2");
-            if cluster_test[1].len() > 10 {
-                println!("{} ", cluster_test[1][counter] + 2);
-            }
-            println!("cluster 3");
-            if cluster_test[2].len() > 10 {
-                println!("{} ", cluster_test[2][counter] + 2);
+            for (key, value) in &counts {
+                println!("{}: {}", key, value);
             }
         }
+        
         //println!("AFTER UPDATE CC {:?}", cluster_centers);
         println!("Assignment vec {:?}\n", assigned_vec);
     }
@@ -173,6 +174,35 @@ fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize, seed: u6
         }
     }
     centers
+}
+
+fn init_cluster_centers_optimal(gene_count: usize, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
+    //println!("{}", cell_count);
+    // only for 3 clusters
+    let mut sum_for_cell_type = vec![vec![0; gene_count]; 3];
+    let mut count_for_cell_type = vec![vec![0; gene_count]; 3];
+    let mut mean_for_cell_type = vec![vec![0.0; gene_count]; 3];
+    for cell_data in all_cell_data {
+        let cell_type = cell_data.cell_type.clone();
+        let mut cluster = 2;
+        if cell_type == "Epithelial" {
+            cluster = 0;
+        }
+        else if cell_type == "Fibroblast" {
+            cluster = 1;
+        }
+        for (index, value) in cell_data.read_counts.iter().enumerate() {
+            sum_for_cell_type[cluster][index] += value;
+            count_for_cell_type[cluster][index] += 1;
+        }
+    }
+    for cluster in 0..3 {
+        for gene_index in 0..gene_count {
+            mean_for_cell_type[cluster][gene_index] = sum_for_cell_type[cluster][gene_index] as f32 / mean_for_cell_type[cluster][gene_index] as f32;
+        }
+    }
+    mean_for_cell_type
+    //vec![vec![11.0, 24.0], vec![43.0, 25.0]]
 }
 
 fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, alpha: f32, seed: u64) -> Vec<Vec<f32>> {
@@ -287,6 +317,8 @@ fn data_loader_spatial() -> (Vec<CellData>, Vec<String>) {
 
 fn data_loader_scrna() -> Vec<CellData> {
     println!("Start Data Loading");
+    // matrix loading
+    let lines_to_load = 1_500;
     let data_file = File::open(DATA_FILE_2).expect("cannot open data file");
     let data_reader = BufReader::new(&data_file);
     
@@ -304,7 +336,7 @@ fn data_loader_scrna() -> Vec<CellData> {
                 gene_expressed_by_cells[gene_index] += 1;
             }
         }
-        if line_index > 1_000 {
+        if line_index > lines_to_load {
             break;
         }
         //println!("{}", line_index);
@@ -312,22 +344,15 @@ fn data_loader_scrna() -> Vec<CellData> {
     let mut consider_genes = vec![false; gene_expressed_by_cells.len()];
     let mut consider_genes_count = 0;
     for (index, gene) in gene_expressed_by_cells.iter().enumerate() {
-        if *gene > 1 {  
+        if *gene > 0 {  
             consider_genes_count += 1;
             consider_genes[index] = true;
         }
     }
-    let mut positives = 0;
-    for test in &consider_genes {
-        if *test == true {
-            positives += 1;
-        }
-    }
     println!("consider only these {}", consider_genes_count);
     let mut all_cell_data= vec![];
-    let data_file_2 = File::open(DATA_FILE_2).expect("cannot open data file");
-    let data_reader_2 = BufReader::new(&data_file_2);
-    for (line_index, line) in data_reader_2.lines().enumerate() {
+    let data_reader = BufReader::new(&data_file);
+    for (line_index, line) in data_reader.lines().enumerate() {
         let line = line.unwrap();
         //println!("{}", line);
         let values: Vec<&str> = line.split(',').collect();
@@ -343,28 +368,22 @@ fn data_loader_scrna() -> Vec<CellData> {
             }
         }
         all_cell_data.push(cell_data);
-        if line_index > 1_000 {
+        if line_index > lines_to_load {
             break;
         }
     }
-    // sort the all data based on one gene entry just to see
-    // let mut all_sorted = vec![];
-    // let mut indices: Vec<usize> = (0..all_cell_data[0].read_counts.len()).collect();
-    
-    // indices.sort_by_key(|&i| all_cell_data[0].read_counts[i]);
-    // indices.reverse();
-    // for index in 0..all_cell_data.len() {
-    //     let sorted: Vec<_> = indices.iter().map(|&i| all_cell_data[index].read_counts[i]).collect();
-    //     if sorted[0] > 0 && sorted[5] > 0 && sorted[10] > 0 {
-    //         for index_2 in 0..10 {
-    //             print!("{} ", sorted[index_2]);
-    //         }
-    //         println!("");
-    //     }
-        
-    //     //println!("{:?}", sorted[0..10]);
-    //     all_sorted.push(sorted);
-    // }
+    // annotation loading for the cells (cell types)
+    let anno_file = File::open(ANNO_FILE).expect("cannot open data file");
+    let data_reader = BufReader::new(&anno_file);
+    for (line_index, line) in data_reader.lines().enumerate().skip(1) {
+        let line = line.unwrap();
+        //println!("{}", line);
+        let values: Vec<&str> = line.split(',').collect();
+        all_cell_data[line_index - 1].cell_type = values[106].to_string();
+        if line_index > lines_to_load + 1 {
+            break;
+        }
+    }
     println!("End Data Loading");
     all_cell_data
 }
@@ -483,13 +502,15 @@ fn _rand_index_calculator (predicted: &Vec<usize>, ground_truth: &Vec<usize>) ->
 #[derive(Clone)]
 struct CellData {
     read_counts: Vec<u16>,
-    gene_count: usize
+    gene_count: usize,
+    cell_type: String
 }
 impl CellData {
     fn new(gene_count: usize) -> CellData {
         CellData{
             read_counts: vec![0; gene_count],
             gene_count: gene_count,
+            cell_type: String::new()
         }
     }
 }
