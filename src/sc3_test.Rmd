@@ -1,5 +1,3 @@
-
-
 ```{r cars}
 library(SC3)
 library(scater)
@@ -7,6 +5,7 @@ library(SingleCellExperiment)
 library(scran)
 
 expr_t <- t(expr)  # SC3 needs genes in rows, cells in columns
+mat <- as.matrix(expr_t)
 
 # Create SingleCellExperiment
 sce <- SingleCellExperiment(assays = list(exprs = as.matrix(expr_t)))
@@ -15,14 +14,14 @@ rowData(sce)$feature_symbol <- rownames(sce)
 
 assay(sce, "logcounts") <- log2(mat + 1)
 
-colData(sce)$cellype_infercnv <- as.factor(NatGen2022_scRNAseq_annotations$celltype_infercnv[1:1000])
+colData(sce)$celltype_infercnv <- as.factor(anno_1000$celltype_infercnv[1:1000])
 
 sce <- sc3(sce, ks = 6, gene_filter = FALSE, biology = TRUE)  # gene_filter TRUE applies
 
 
 
 # View cluster labels (for each k)
-colData(sce)[, grep("^sc3_", colnames(colData(sce)))]
+colData(sce)[, c("cellype_infercnv", grep("^sc3_", colnames(colData(sce)), value = TRUE))]
 
 # Example plots:
 # sc3_plot_consensus(sce, k = 3)
@@ -33,6 +32,37 @@ colData(sce)[, grep("^sc3_", colnames(colData(sce)))]
 ```{r}
 
 sce <- runPCA(sce, exprs_values = "logcounts")
-plotPCA(sce, colour_by = "cellype_infercnv")
-colData(sce)[, c("cellype_infercnv", grep("^sc3_", colnames(colData(sce)), value = TRUE))]
+plotPCA(sce, colour_by = "celltype_infercnv")
+df <- as.data.frame(colData(sce)[, c("celltype_infercnv", grep("^sc3_", colnames(colData(sce)), value = TRUE))])
+View(df)
+```
+
+```{r}
+library(ggplot2)
+
+# Load the dataset
+data <- result
+data$cluster  <- as.factor(data[, 1])
+
+ggplot(data, aes(x = V3, y = V4, color = cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  theme_minimal() +
+  labs(title = "PCA of Cell Clusters", x = "PC1", y = "PC2", color = "Cluster")
+
+likelihoods <- data[, 3:ncol(data)]
+likelihoods <- t(apply(likelihoods[,1:ncol(likelihoods)], 1, function(x){(x/mean(x))}))
+# Perform PCA
+pca_result <- prcomp(likelihoods, center = TRUE, scale. = FALSE)
+
+# Create a data frame for plotting
+pca_data <- data.frame(PC1 = pca_result$x[, 1], 
+                        PC2 = pca_result$x[, 2], 
+                        Cluster = as.factor(data[, 1]))  # Convert cluster to factor for coloring
+
+# Plot PCA results
+ggplot(pca_data, aes(x = PC1, y = PC2, color = Cluster)) +
+  geom_point(alpha = 0.7, size = 2) +
+  theme_minimal() +
+  labs(title = "PCA of Cell Clusters", x = "PC1", y = "PC2", color = "Cluster")
+
 ```
