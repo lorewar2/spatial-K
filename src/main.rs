@@ -10,12 +10,13 @@ const DATA_FILE: &'static str = "./data/data.csv";
 const DATA_FILE_2: &'static str = "./data/dense.csv";
 const ANNO_FILE: &'static str = "./data/NatGen2022_scRNAseq_annotations.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 2;
+const K: usize = 3;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 2;
 
 fn main() {
+    // what is "16, FIX data loading !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     let all_cell_data = data_loader_scrna();
     //let (_all_cell_data, _ground_truth) = data_simulator(SEED);
     // let (all_cell_data, cell_ids) = data_loader_spatial();
@@ -23,19 +24,21 @@ fn main() {
     let alpha = 4.5;
     let gene_count = all_cell_data[0].gene_count;
     // // initialize the cluster centers gamma
-    let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
+    //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
+    // try cluster weights, in log
+    let mut cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
     //let mut cluster_centers = init_cluster_centers_optimal(gene_count, &all_cell_data);
-    //let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
-    let log_loss_final = em(gene_count, &mut cluster_centers, &all_cell_data);
+    let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha, seed);
+    let log_loss_final = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data);
     // //result_display(&log_loss_final, &ground_truth);
     let mut string_vec = vec![];
     for cell in all_cell_data {
         string_vec.push(cell.cell_type);
     }
-    data_writer(string_vec, log_loss_final);
+    //data_writer(string_vec, log_loss_final);
 }
 
-fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>) -> Vec<Vec<f32>> {
     //println!("Starting cc {:?}", cluster_centers);
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
@@ -46,10 +49,13 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
     let mut last_log_loss = 0.0;
     // update probs to update the cc
     let mut update_prob: Vec<Vec<f32>> = Vec::new();
+    let mut update_weight: Vec<Vec<f32>> = Vec::new();
     for cluster in 0..num_clusters {
         update_prob.push(Vec::new());
+        update_weight.push(Vec::new());
         for _index in 0..gene_count {
             update_prob[cluster].push(0.000000001);
+            update_weight[cluster].push(0.0);
         }
     }
     // run 10 times and see
@@ -58,23 +64,26 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob);
         for (celldex, cell) in all_cell_data.iter().enumerate() {
-            // calculate poisson loss here
-            let log_poisson = poisson_loss(cell, &cluster_centers, log_prior);
+            // calculate poisson loss here // Modify with cluster weights
+            let log_poisson = poisson_loss(cell, &cluster_centers, &cluster_weights);
             log_loss_final[celldex] = log_poisson.clone();
             // sum up the total loss
             log_poisson_total += log_sum_exp(&log_poisson);
             // update the temp probs
-            update_update_prob(&mut update_prob, cell, &log_poisson, cell_count);
+            update_update_prob(&mut update_prob, &mut update_weight, cell, &log_poisson, cell_count);
+            
         }
         //println!("BEFORE UPDATE CC {:?}", cluster_centers);
         update_cluster_centers(gene_count, &update_prob, &mut cluster_centers);
+        // update the cluster weights, without this should be same as const prior
+        update_cluster_weights(gene_count, &update_weight, &mut cluster_weights);
         // display stuff
         let log_loss_change = log_poisson_total - last_log_loss;
         last_log_loss = log_poisson_total;
         println!("poisson\t{}\t{}\t{}", run, log_poisson_total, log_loss_change);
         // check the cluster assignment
         let mut assigned_vec: Vec<usize> = vec![0; num_clusters];
-        let mut cluster_test = vec![vec![]; 2];
+        let mut cluster_test = vec![vec![]; num_clusters];
         for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
             let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
             assigned_vec[index_of_max] += 1;
@@ -93,9 +102,25 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, all_cell_data:
         }
         
         //println!("AFTER UPDATE CC {:?}", cluster_centers);
-        println!("Assignment vec {:?}\n", assigned_vec);
+        println!("Assignment vec {:?}", assigned_vec);
+        println!("Cluster weights {:?}\n", cluster_weights);
     }
     log_loss_final
+}
+
+fn update_cluster_weights(gene_count: usize, update_weight: &Vec<Vec<f32>>, cluster_weights: &mut Vec<f32>) {
+    for cluster in 0..update_weight.len() {
+        let mut total_cluster_update = 0.0;
+        for locus in 0..gene_count {
+            let update = update_weight[cluster][locus];
+            total_cluster_update += update;
+            //println!("{}", update);
+        }
+        cluster_weights[cluster] = total_cluster_update;
+    }
+    let sum: f32 = cluster_weights.iter().sum();
+    let normalized: Vec<f32> = cluster_weights.iter().map(|&x| x / sum).collect();
+    *cluster_weights = normalized;
 }
 
 fn update_cluster_centers(gene_count: usize, update_prob: &Vec<Vec<f32>>, cluster_centers: &mut Vec<Vec<f32>>) {
@@ -108,7 +133,7 @@ fn update_cluster_centers(gene_count: usize, update_prob: &Vec<Vec<f32>>, cluste
     }
 }
 
-fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_poisson: &Vec<f32>, cell_count: usize) {
+fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, update_weight: &mut Vec<Vec<f32>>, cell: &CellData, log_poisson: &Vec<f32>, cell_count: usize) {
     for locus in 0..cell.gene_count {
         // get the sum
         let sum = log_sum_exp(log_poisson);
@@ -117,14 +142,15 @@ fn update_update_prob(update_prob: &mut Vec<Vec<f32>>, cell: &CellData, log_pois
             let update_prob_exp = (probability - sum).exp() / (cell_count as f32 / 2.9);
             //println!("{}", update_prob_exp);
             update_prob[cluster][locus] += update_prob_exp * (cell.read_counts[locus] as f32);
+            update_weight[cluster][locus] += update_prob_exp;
         }
     }
 }
 
-fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_prior: f32) -> Vec<f32> {
+fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_cluster_weight: &Vec<f32>) -> Vec<f32> {
     let mut log_probabilities: Vec<f32> = Vec::new();
     for (cluster, center) in cluster_centers.iter().enumerate() {
-        log_probabilities.push(log_prior);
+        log_probabilities.push(log_cluster_weight[cluster]);
         for (gene_index, read_count) in cell.read_counts.iter().enumerate() {
             //log(P)=-λ+x​log(λ​)-log(x​!)
             //x = read count 
