@@ -21,17 +21,18 @@ fn main() {
     //let (all_cell_data_original, cell_ids) = data_loader_spatial();
     let best_total_loss = -f32::INFINITY;
     let mut _best_final_log_loss;
-    for seed in 0..10 {
+    let temp_vec = vec![1016.0, 1017.0, 1018.0, 1019.0, 1020.0, 1021.0];
+    for seed in 0..6 {
         println!("SEED {}", seed);
         let all_cell_data = all_cell_data_original.clone();
         let gene_count = all_cell_data[0].gene_count;
         // initialize cluster centers
         //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
-        //let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, seed)
-        let mut cluster_centers = init_cluster_centers_optimal(gene_count, K, &all_cell_data);
+        let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, &seed);
+        //let mut cluster_centers = init_cluster_centers_optimal(gene_count, K, &all_cell_data);
         let mut cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
         // run EM
-        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data);
+        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, temp_vec[seed as usize]);
         let mut string_vec = vec![];
         for cell in all_cell_data {
             string_vec.push(cell.cell_type);
@@ -43,7 +44,7 @@ fn main() {
     //data_writer(cell_ids, _best_final_log_loss);
 }
 
-fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>) -> (Vec<Vec<f32>>, f32) {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, temp: f32) -> (Vec<Vec<f32>>, f32) {
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
     let num_clusters = K;
@@ -72,12 +73,12 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
             // sum up the total loss
             log_poisson_total += log_sum_exp(&log_poisson);
             // update the temp probs
-            update_update_prob(&mut update_prob, &mut update_weight, cell, &log_poisson, cell_count, 10.0);
+            update_update_prob(&mut update_prob, &mut update_weight, cell, &log_poisson, cell_count, temp);
         }
         //println!("BEFORE UPDATE CC {:?}", cluster_centers);
         update_cluster_centers(gene_count, &update_prob, &mut cluster_centers);
         // update the cluster weights, without this should be same as const prior
-        update_cluster_weights(gene_count, &update_weight, &mut cluster_weights);
+        //update_cluster_weights(gene_count, &update_weight, &mut cluster_weights);
         // display stuff
         let log_loss_change = log_poisson_total - last_log_loss;
         last_log_loss = log_poisson_total;
@@ -85,12 +86,23 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
         // check the cluster assignment
         let mut assigned_vec: Vec<usize> = vec![0; num_clusters];
         let mut cluster_test = vec![vec![]; num_clusters];
+        let mut ground_truth = vec![];
+        let mut predicted = vec![];
+        let type_vec = vec!["Epithelial", "Fibroblast", "Endothelial", "Endocrine", "Immune", "Schwann", "unknown"];
         // Print stuff for testing
         for (index, final_log_probability) in log_loss_final.iter().enumerate() {
             let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
             assigned_vec[index_of_max] += 1;
             cluster_test[index_of_max].push(all_cell_data[index].cell_type.clone());
+            predicted.push(index_of_max);
+            for (index2, _type) in type_vec.iter().enumerate() {
+                if *_type == all_cell_data[index].cell_type.clone() {
+                    ground_truth.push(index2);
+                }
+            }
         }
+        let rand_index = rand_index_calculator(&predicted, &ground_truth);
+        println!("Rand Index {}\n", rand_index);
         for (index, cluster) in cluster_test.iter().enumerate() {
             println!("Cluster {}\tweight:{}\tcells:{} ", index, cluster_weights[index].exp(), assigned_vec[index]);
             let mut counts = HashMap::new();
@@ -184,7 +196,7 @@ fn data_loader_scrna(seed: u64) -> Vec<CellData> {
     println!("{}", all_cell_data.len());
     // load the gene list
     println!("{}", all_cell_data[0].gene_count);
-    
+
     println!("End Data Loading");
     all_cell_data
 }
@@ -198,8 +210,8 @@ fn poisson_loss(cell: &CellData, cluster_centers: &Vec<Vec<f32>>, log_cluster_we
             //x = read count 
             //λ = center[gene_index]
             let mut mod_read_count = *read_count;
-            if mod_read_count > 120 {
-                mod_read_count = 120;
+            if mod_read_count > 100 {
+                mod_read_count = 100;
             }
             let value = - center[gene_index] + mod_read_count as f32 * center[gene_index].ln();
             let factorial = (factorial(mod_read_count) as f32 + 0.000000001).ln();
@@ -328,10 +340,10 @@ fn init_cluster_centers_optimal(gene_count: usize, cluster_num: usize, all_cell_
     mean_for_cell_type
 }
 
-fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, alpha: f32, seed: u64) -> Vec<Vec<f32>> {
+fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, alpha: f32, seed: &u64) -> Vec<Vec<f32>> {
     // initialize values
     let mut centers: Vec<Vec<f32>> = vec![vec![]; num_clusters];
-    let mut rng = StdRng::seed_from_u64(seed);
+    let mut rng = StdRng::seed_from_u64(*seed);
     let mut read_counts_gene = vec![vec![]; gene_count];
     let mut non_zero_counts = vec![0; gene_count];
     let mut read_counts_gene_sum = vec![0; gene_count];
@@ -351,7 +363,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
         if read_count.len() > 0 {
             let mut temp = read_count.clone();
             temp.sort();
-            means.push(temp[temp.len() / 4] as f32);
+            means.push(temp[temp.len() / 8] as f32);
         }
         else {
             means.push(0.0000001);
