@@ -11,7 +11,7 @@ const DATA_FILE: &'static str = "./data/data.csv";
 const DATA_FILE_2: &'static str = "./data/dense.csv";
 const ANNO_FILE: &'static str = "./data/NatGen2022_scRNAseq_annotations.csv";
 const OUT_FILE: &'static str = "./result.tsv";
-const K: usize = 7;
+const K: usize = 6;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 2;
@@ -21,18 +21,18 @@ fn main() {
     //let (all_cell_data_original, cell_ids) = data_loader_spatial();
     let best_total_loss = -f32::INFINITY;
     let mut _best_final_log_loss;
-    let temp_vec = vec![1016.0, 1017.0, 1018.0, 1019.0, 1020.0, 1021.0];
+    let alpha_vec = vec![1.0, 2.0 , 3.0, 4.0, 5.0, 6.0];
     for seed in 0..6 {
         println!("SEED {}", seed);
         let all_cell_data = all_cell_data_original.clone();
         let gene_count = all_cell_data[0].gene_count;
         // initialize cluster centers
         //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
-        let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, &seed);
+        let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, alpha_vec[seed as usize], &0);
         //let mut cluster_centers = init_cluster_centers_optimal(gene_count, K, &all_cell_data);
         let mut cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
         // run EM
-        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, temp_vec[seed as usize]);
+        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, 1020.0);
         let mut string_vec = vec![];
         for cell in all_cell_data {
             string_vec.push(cell.cell_type);
@@ -62,7 +62,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
         }
     }
     // run 10 times and see
-    for run in 0..20 {
+    for run in 0..10 {
         let mut log_poisson_total = 0.0;
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob);
@@ -88,7 +88,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
         let mut cluster_test = vec![vec![]; num_clusters];
         let mut ground_truth = vec![];
         let mut predicted = vec![];
-        let type_vec = vec!["Epithelial", "Fibroblast", "Endothelial", "Endocrine", "Immune", "Schwann", "unknown"];
+        let type_vec = vec!["Epithelial", "Fibroblast", "Endothelial", "Endocrine", "Immune", "Schwann"];
         // Print stuff for testing
         for (index, final_log_probability) in log_loss_final.iter().enumerate() {
             let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
@@ -144,8 +144,10 @@ fn data_loader_scrna(seed: u64) -> Vec<CellData> {
                 indices_4_cell_type[x].push(line_index - 1);
             }
             None => {
-                cell_types.push(values[96].to_string());
-                indices_4_cell_type.push(vec![line_index - 1]);
+                if values[96].to_string() != "unknown" {
+                    cell_types.push(values[96].to_string());
+                    indices_4_cell_type.push(vec![line_index - 1]);
+                }
             }
         }
         total_cells += 1;
@@ -319,9 +321,6 @@ fn init_cluster_centers_optimal(gene_count: usize, cluster_num: usize, all_cell_
         else if cell_type == "Schwann" {
             cluster = 5;
         }
-        else if cell_type == "unknown" {
-            cluster = 6;
-        }
         if cluster >= cluster_num {
             cluster = cluster_num - 1;
         }
@@ -363,7 +362,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
         if read_count.len() > 0 {
             let mut temp = read_count.clone();
             temp.sort();
-            means.push(temp[temp.len() / 8] as f32);
+            means.push(temp[temp.len() / 4] as f32);
         }
         else {
             means.push(0.0000001);
