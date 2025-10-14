@@ -120,6 +120,9 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
 }
 
 fn data_loader_scrna(seed: u64) -> Vec<CellData> {
+    // save the data on a separate file, the filtered data to test with sc3
+
+    // use different number of genes, (increasing dimensions and stuff) and see if it helps the clustering 
     println!("Start Data Loading");
     let mut rng = StdRng::seed_from_u64(seed);
     let cells_to_load = 2000;
