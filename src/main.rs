@@ -2,19 +2,22 @@
 use core::f32;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Seek, Write};
+use std::fs::{OpenOptions};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand_distr::{Poisson, Distribution, Gamma};
 
 const DATA_FILE: &'static str = "./data/data.csv";
-const DATA_FILE_2: &'static str = "./data/dense.csv";
+const DENSE_FILE: &'static str = "./data/dense.csv";
 const ANNO_FILE: &'static str = "./data/NatGen2022_scRNAseq_annotations.csv";
 const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 6;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
 const SEED: u64 = 2;
+const OUT_FILE_ANNO: &'static str = "./data/mod_anno.csv";
+const OUT_FILE_DENSE: &'static str = "./data/mod_dense.csv";
 
 fn main() {
     let all_cell_data_original = data_loader_scrna(SEED);
@@ -120,8 +123,6 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
 }
 
 fn data_loader_scrna(seed: u64) -> Vec<CellData> {
-    // save the data on a separate file, the filtered data to test with sc3
-
     // use different number of genes, (increasing dimensions and stuff) and see if it helps the clustering 
     println!("Start Data Loading");
     let mut rng = StdRng::seed_from_u64(seed);
@@ -138,6 +139,7 @@ fn data_loader_scrna(seed: u64) -> Vec<CellData> {
 
     let anno_file = File::open(ANNO_FILE).expect("cannot open data file");
     let anno_data_reader = BufReader::new(&anno_file);
+    // skips the header
     for (line_index, line) in anno_data_reader.lines().enumerate().skip(1) {
         let line = line.unwrap();
         let values: Vec<&str> = line.split(',').collect();
@@ -179,7 +181,7 @@ fn data_loader_scrna(seed: u64) -> Vec<CellData> {
     //println!("{:?} {:?}", required_indices, required_cell_types);
     // load the required data
     let mut all_cell_data= vec![];
-    let data_file = File::open(DATA_FILE_2).expect("cannot open data file");
+    let data_file = File::open(DENSE_FILE).expect("cannot open data file");
     let data_reader = BufReader::new(&data_file);
     for (line_index, line) in data_reader.lines().enumerate() {
         match required_indices.iter().position(|name| name == &line_index) {
@@ -198,6 +200,30 @@ fn data_loader_scrna(seed: u64) -> Vec<CellData> {
             None => {}
         }
     }
+    // write the filtered indices separately (dense and annotations), comment this out for real
+    // annotations
+    // println!("START WRITING FILTERED FOR SC3");
+    // let mut out_file = OpenOptions::new().create(true).append(true).open(OUT_FILE_ANNO).expect("cannot open output file");
+    // let anno_file = File::open(ANNO_FILE).expect("cannot open data file");
+    // let anno_data_reader = BufReader::new(&anno_file);
+    // for (line_index, line) in anno_data_reader.lines().enumerate() {
+    //     let line = line.unwrap();
+    //     if required_indices.contains(&(line_index - 1)) || line_index == 0 {
+    //         // write the line
+    //         writeln!(out_file, "{}", line).expect("failed to write line");
+    //     }
+    // }
+
+    // let mut out_file = OpenOptions::new().create(true).append(true).open(OUT_FILE_DENSE).expect("cannot open output file");
+    // let data_file = File::open(DENSE_FILE).expect("cannot open data file");
+    // let data_reader = BufReader::new(&data_file);
+    // for (line_index, line) in data_reader.lines().enumerate() {
+    //     let line = line.unwrap();
+    //     if required_indices.contains(&line_index) {
+    //         // write the line
+    //         writeln!(out_file, "{}", line).expect("failed to write line");
+    //     }
+    // }
     println!("{}", all_cell_data.len());
     // load the gene list
     println!("{}", all_cell_data[0].gene_count);

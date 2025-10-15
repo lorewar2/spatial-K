@@ -1,10 +1,12 @@
+
+
 ```{r cars}
 library(SC3)
 library(scater)
 library(SingleCellExperiment)
 library(scran)
 
-expr_t <- t(expr)  # SC3 needs genes in rows, cells in columns
+expr_t <- t(mod_dense)  # SC3 needs genes in rows, cells in columns
 mat <- as.matrix(expr_t)
 
 # Create SingleCellExperiment
@@ -14,7 +16,7 @@ rowData(sce)$feature_symbol <- rownames(sce)
 
 assay(sce, "logcounts") <- log2(mat + 1)
 
-colData(sce)$celltype_infercnv <- as.factor(anno_1000$celltype_infercnv[1:1000])
+colData(sce)$celltype_infercnv <- as.factor(mod_anno$celltype_infercnv)
 
 sce <- sc3(sce, ks = 6, gene_filter = FALSE, biology = TRUE)  # gene_filter TRUE applies
 
@@ -35,34 +37,38 @@ sce <- runPCA(sce, exprs_values = "logcounts")
 plotPCA(sce, colour_by = "celltype_infercnv")
 df <- as.data.frame(colData(sce)[, c("celltype_infercnv", grep("^sc3_", colnames(colData(sce)), value = TRUE))])
 View(df)
-```
 
-```{r}
-library(ggplot2)
+library(dplyr)
 
-# Load the dataset
-data <- result
-data$cluster  <- as.factor(data[, 1])
+df_summary <- df %>%
+  group_by(sc3_6_clusters, celltype_infercnv) %>%
+  summarise(count = n(), .groups = "drop")
 
-ggplot(data, aes(x = V3, y = V4, color = cluster)) +
-  geom_point(alpha = 0.7, size = 2) +
-  theme_minimal() +
-  labs(title = "PCA of Cell Clusters", x = "PC1", y = "PC2", color = "Cluster")
+print(df_summary)
 
-likelihoods <- data[, 3:ncol(data)]
-likelihoods <- t(apply(likelihoods[,1:ncol(likelihoods)], 1, function(x){(x/mean(x))}))
-# Perform PCA
-pca_result <- prcomp(likelihoods, center = TRUE, scale. = FALSE)
+rand_index <- function(labels1, labels2) {
+  n <- length(labels1)
+  
+  # All pair indices
+  combs <- combn(n, 2)
+  
+  # Agreements/disagreements
+  agree_same <- sum((labels1[combs[1,]] == labels1[combs[2,]]) & 
+                    (labels2[combs[1,]] == labels2[combs[2,]]))
+  
+  agree_diff <- sum((labels1[combs[1,]] != labels1[combs[2,]]) & 
+                    (labels2[combs[1,]] != labels2[combs[2,]]))
+  
+  total_pairs <- ncol(combs)
+  
+  RI <- (agree_same + agree_diff) / total_pairs
+  return(RI)
+}
 
-# Create a data frame for plotting
-pca_data <- data.frame(PC1 = pca_result$x[, 1], 
-                        PC2 = pca_result$x[, 2], 
-                        Cluster = as.factor(data[, 1]))  # Convert cluster to factor for coloring
 
-# Plot PCA results
-ggplot(pca_data, aes(x = PC1, y = PC2, color = Cluster)) +
-  geom_point(alpha = 0.7, size = 2) +
-  theme_minimal() +
-  labs(title = "PCA of Cell Clusters", x = "PC1", y = "PC2", color = "Cluster")
+
+ri <- rand_index(df$celltype_infercnv, df$sc3_6_clusters)
+
+print(ri)
 
 ```
