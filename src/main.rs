@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 use core::f32;
-use std::collections::btree_map::Range;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, Write};
-use std::fs::{OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
 use rand_distr::{Poisson, Distribution, Gamma};
@@ -16,36 +14,32 @@ const OUT_FILE: &'static str = "./result.tsv";
 const K: usize = 6;
 const GENE_NUM_SIM: usize = 10;
 const CELL_NUM_SIM: usize = 30;
-const SEED: u64 = 2;
 const OUT_FILE_ANNO: &'static str = "./data/mod_anno.csv";
 const OUT_FILE_DENSE: &'static str = "./data/mod_dense.csv";
 
 fn main() {
-    let all_cell_data_original = data_loader_scrna(SEED);
+    let all_cell_data_original = data_loader_scrna(&mut StdRng::seed_from_u64(0));
     //let (all_cell_data_original, cell_ids) = data_loader_spatial();
     let mut best_total_loss = -f32::INFINITY;
     let mut best_final_log_loss_vec;
     // activated genes, use these genes
-    let mut activated_genes = vec![true; all_cell_data_original[0].gene_count / 2];
-    if all_cell_data_original[0].gene_count % 2 == 0 {
-        activated_genes.extend(vec![true; all_cell_data_original[0].gene_count / 2]);
-    }
-    else {
-        activated_genes.extend(vec![true; (all_cell_data_original[0].gene_count / 2) + 1]);
-    }
+    let mut activated_genes = vec![true; all_cell_data_original[0].gene_count];
     for seed in 0..10_000 {
         println!("SEED {}", seed);
+        let mut rng = StdRng::seed_from_u64(seed);
         let all_cell_data = all_cell_data_original.clone();
         // gene count should be the number of activated genes
         let gene_count = activated_genes.iter().filter(|&b| *b).count();
-        let mut cluster_centers = cluster_init_search (gene_count, K, &all_cell_data, &seed, &activated_genes);
+        //let mut cluster_centers = cluster_init_search(gene_count, K, &all_cell_data, &mut rng, &activated_genes);
+        let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, &mut rng, &mut activated_genes);
         // initialize cluster centers
         //let mut cluster_centers = init_cluster_centers_uniform(gene_count, K, seed);
-        // let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, &seed, &activated_genes);
         // //let mut cluster_centers = init_cluster_centers_optimal(gene_count, K, &all_cell_data);
         let mut cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
         // run EM
-        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, &activated_genes);
+        let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, &mut activated_genes);
+        // find the most contributing genes
+
         let mut string_vec = vec![];
         for cell in all_cell_data {
             string_vec.push(cell.cell_type);
@@ -59,49 +53,11 @@ fn main() {
     //data_writer(cell_ids, _best_final_log_loss);
 }
 
-fn cluster_init_search (gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, seed: &u64, activated_genes: &Vec<bool>) -> Vec<Vec<f32>> {
-    let mut cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
-    let mut min_penalty = 1000000000.00;
-    let mut best_cc = vec![];
-    //search thousand, choose the best one
-    for updated_seed in *seed .. *seed + 100 {
-        // get the ccs
-        let mut log_loss_final = vec![vec![]; all_cell_data.len()];
-        let cluster_centers = init_cluster_centers_gamma(gene_count, num_clusters, &all_cell_data, 4.5, &updated_seed, &activated_genes);
-        // calculate poisson loss
-        for (celldex, cell) in all_cell_data.iter().enumerate() {
-            // calculate poisson loss here // Modify with cluster weights
-            let log_poisson = poisson_loss(cell, &cluster_centers, &cluster_weights, activated_genes);
-            log_loss_final[celldex] = log_poisson.clone();
-            // sum up the total loss
-        }
-        // calculate cell distribution
-        let penalty = calculate_cell_distribution_deviation(&log_loss_final);
-        if penalty < min_penalty {
-            min_penalty = penalty;
-            best_cc = cluster_centers;
-        }
-    }
-    best_cc
+fn find_significant_genes (log_loss_final: &Vec<Vec<f32>>) {
+
 }
 
-fn calculate_cell_distribution_deviation (log_loss_cell: &Vec<Vec<f32>>) -> f32 {
-    let mut assigned_vec: Vec<usize> = vec![0; K];
-    // Print stuff for testing
-    for (_index, final_log_probability) in log_loss_cell.iter().enumerate() {
-        let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
-        assigned_vec[index_of_max] += 1;
-    }
-    // method one: 0 gets high penalty and after 30 ~ 50 penalty is negligable 30 vs 100 y = 1/x
-    let mut penalty = 0.0;
-    for cell_count in &assigned_vec {
-        penalty += 100.0 / (*cell_count as f32 + 0.00000000001); 
-    }
-    println!("distribution {:?}, penalty {}", assigned_vec, penalty);
-    // method two: away from equal distribution gets penalty sqrt distance 
-    penalty
-}
-fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, activated_genes: &Vec<bool>) -> (Vec<Vec<f32>>, f32) {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, activated_genes: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
     let num_clusters = K;
@@ -176,10 +132,59 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
     (log_loss_final, last_log_loss)
 }
 
-fn data_loader_scrna(seed: u64) -> Vec<CellData> {
+fn cluster_init_search (gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, rng: &mut StdRng, activated_genes: &mut Vec<bool>) -> Vec<Vec<f32>> {
+    let cluster_weights = vec![(1.0 / (K as f32)).ln(); K];
+    let mut min_penalty = 1000000000.00;
+    let mut best_cc = vec![];
+    //search thousand, choose the best one
+    for _ in 0..100 {
+        // get the ccs
+        let mut log_loss_final = vec![vec![]; all_cell_data.len()];
+        let cluster_centers = init_cluster_centers_gamma(gene_count, num_clusters, &all_cell_data, 4.5, rng, activated_genes);
+        // calculate poisson loss
+        for (celldex, cell) in all_cell_data.iter().enumerate() {
+            // calculate poisson loss here // Modify with cluster weights
+            let log_poisson = poisson_loss(cell, &cluster_centers, &cluster_weights, activated_genes);
+            log_loss_final[celldex] = log_poisson.clone();
+            // sum up the total loss
+        }
+        // calculate cell distribution
+        let penalty = calculate_cell_distribution_deviation(&log_loss_final);
+        if penalty < min_penalty {
+            min_penalty = penalty;
+            best_cc = cluster_centers;
+        }
+    }
+    best_cc
+}
+
+fn calculate_cell_distribution_deviation (log_loss_cell: &Vec<Vec<f32>>) -> f32 {
+    let mut assigned_vec: Vec<usize> = vec![0; K];
+    let total_cells = log_loss_cell.len();
+    // Print stuff for testing
+    for (_index, final_log_probability) in log_loss_cell.iter().enumerate() {
+        let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
+        assigned_vec[index_of_max] += 1;
+    }
+    // method one: 0 gets high penalty and after 100 penalty is negligable 100 vs 300 (y = 1/x)
+    let mut penalty1 = 0.0;
+    for cell_count in &assigned_vec {
+        penalty1 += 100.0 / (*cell_count as f32 + 0.00000000001); 
+    }
+    // method two: away from equal distribution gets penalty sqrt distance
+    let mut penalty2 = 0.0;
+    let equal_dis = (total_cells / K) as f32;
+    for cell_count in &assigned_vec {
+        penalty2 += (equal_dis - (*cell_count as f32)).powf(2.0);
+    }
+    println!("distribution {:?}, penalty {} {} = {}", assigned_vec, penalty1, penalty2, penalty1 + penalty2);
+    penalty1 + penalty2
+}
+
+fn data_loader_scrna(rng: &mut StdRng) -> Vec<CellData> {
     // use different number of genes, (increasing dimensions and stuff) and see if it helps the clustering 
     println!("Start Data Loading");
-    let mut rng = StdRng::seed_from_u64(seed);
+    
     let cells_to_load = 2000;
     let equal_cell = true;
 
@@ -444,10 +449,9 @@ fn init_cluster_centers_optimal(gene_count: usize, cluster_num: usize, all_cell_
     mean_for_cell_type
 }
 
-fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, alpha: f32, seed: &u64, activated_genes: &Vec<bool>) -> Vec<Vec<f32>> {
+fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_data: &Vec<CellData>, alpha: f32, rng: &mut StdRng, activated_genes: &mut Vec<bool>) -> Vec<Vec<f32>> {
     // initialize values
     let mut centers: Vec<Vec<f32>> = vec![vec![]; num_clusters];
-    let mut rng = StdRng::seed_from_u64(*seed);
     let mut read_counts_gene = vec![vec![]; gene_count];
     let mut non_zero_counts = vec![0; gene_count];
     let mut read_counts_gene_sum = vec![0; gene_count];
@@ -483,7 +487,7 @@ fn init_cluster_centers_gamma(gene_count: usize, num_clusters: usize, all_cell_d
         let theta = mean / alpha;
         let gamma = Gamma::new(alpha, theta).expect("invalid");
         for cluster in 0..num_clusters {
-            let drawn_value = gamma.sample(&mut rng);
+            let drawn_value = gamma.sample(rng);
             centers[cluster].push(drawn_value);
         }
     }
