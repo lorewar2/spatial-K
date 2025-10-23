@@ -26,10 +26,11 @@ fn main() {
     let mut activated_genes = vec![true; all_cell_data_original[0].gene_count];
     for seed in 0..10_000 {
         println!("SEED {}", seed);
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = StdRng::seed_from_u64(0);
         let all_cell_data = all_cell_data_original.clone();
         // gene count should be the number of activated genes
         let gene_count = activated_genes.iter().filter(|&b| *b).count();
+        println!("Number of genes considered {}", gene_count);
         //let mut cluster_centers = cluster_init_search(gene_count, K, &all_cell_data, &mut rng, &activated_genes);
         let mut cluster_centers = init_cluster_centers_gamma(gene_count, K, &all_cell_data, 4.5, &mut rng, &mut activated_genes);
         // initialize cluster centers
@@ -39,7 +40,7 @@ fn main() {
         // run EM
         let (log_loss_final, total_loss) = em(gene_count, &mut cluster_centers, &mut cluster_weights, &all_cell_data, &mut activated_genes);
         // find the most contributing genes
-
+        find_significant_genes (&cluster_centers, &mut activated_genes, &log_loss_final);
         let mut string_vec = vec![];
         for cell in all_cell_data {
             string_vec.push(cell.cell_type);
@@ -53,8 +54,48 @@ fn main() {
     //data_writer(cell_ids, _best_final_log_loss);
 }
 
-fn find_significant_genes (log_loss_final: &Vec<Vec<f32>>) {
-
+fn find_significant_genes (cluster_centers: &Vec<Vec<f32>>, activated_genes: &mut Vec<bool>, log_loss_final: &Vec<Vec<f32>>) {
+    //maybe only consider the biggest cluster, which probably has two or more cell types
+    let mut clusters_to_consider = vec![];
+    let mut assigned_vec = vec![0; cluster_centers.len()];
+    for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
+        let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
+        assigned_vec[index_of_max] += 1;
+    }
+    // choose the clusters with two cell types 
+    for (index, assigned_cluster) in assigned_vec.iter().enumerate() {
+        if assigned_cluster > &500 {
+            clusters_to_consider.push(index);
+        }
+    }
+    let mut genes_to_deactivate = vec![];
+    // go through the clusters
+    for (cluster_index, cluster_center) in cluster_centers.iter().enumerate() {
+        if !clusters_to_consider.contains(&cluster_index) {
+            continue;
+        }
+        let mut cluster_gene_index = 0;
+        let mut gene_values = vec![(0, 0.0); cluster_centers[0].len()];
+        for (activated_index, value) in activated_genes.iter().enumerate() {
+            if *value == true {
+                gene_values[cluster_gene_index].0 = activated_index;
+                gene_values[cluster_gene_index].1 += cluster_center[cluster_gene_index];
+                cluster_gene_index += 1;
+            }
+        }
+        gene_values.sort_by_key(|a| a.1.to_bits());
+        gene_values.reverse();
+        // deactivate 3 genes in this cluster
+        for value in gene_values[0..1].to_vec() {
+            genes_to_deactivate.push(value.0);
+        }
+    }
+    // activate all and deactivate the high ones
+    for index in 0..activated_genes.len() {
+        if genes_to_deactivate.contains(&index) {
+            activated_genes[index] = false;
+        }
+    }
 }
 
 fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, activated_genes: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
