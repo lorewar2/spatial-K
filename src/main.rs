@@ -54,6 +54,10 @@ fn main() {
     //data_writer(cell_ids, _best_final_log_loss);
 }
 
+fn check_variance_mean_genes () {
+    //if different use two ccs to find correct clustering
+}
+
 fn find_significant_genes (cluster_centers: &Vec<Vec<f32>>, activated_genes: &mut Vec<bool>, log_loss_final: &Vec<Vec<f32>>) {
     //maybe only consider the biggest cluster, which probably has two or more cell types
     let mut clusters_to_consider = vec![];
