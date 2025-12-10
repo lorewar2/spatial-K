@@ -199,6 +199,7 @@ def cluster_consensus_matrix(consensus_matrix, n_clusters, batch_size, random_st
         batch_size = batch_size,
         random_state = random_state
     )
+    print("matrix shape ", consensus_matrix.shape[0])
     kmeans.fit(consensus_matrix)
 
     return kmeans.labels_
