@@ -43,6 +43,7 @@ def main():
     adata = adata_scrna.concatenate(adata_spatial, batch_key='batch')
     adata.X = np.nan_to_num(adata.X, nan=0)
     X = adata.X
+    # look to see how many. nan
     print("Contains NaN:", np.isnan(X).any())
     print("Contains inf:", np.isinf(X).any())
     print("Min value:", X.min())
@@ -64,19 +65,6 @@ def main():
     consensus(adata_spatial_pca, n_clusters = 6)
     print("Sc3 on spatial")
 
-
-    # print("Scaling Done")
-    # 
-    # print("Log conversion Done")
-    # # Perform PCA for dimensionality reduction
-    # 
-    # print("PCA Done")
-    # # Apply SC3 consensus clustering with n_clusters=6 (matching the ks=6)
-    # 
-
-    
-
-    # #print(adata_spatial.obs['sc3s_6'])
     # adata_spatial.obs['sc3s_4'].to_csv("sc3s_6.csv", index=False)
 
 def get_common_indices():
