@@ -18,10 +18,94 @@ const OUT_FILE_ANNO: &'static str = "./data/mod_anno.csv";
 const OUT_FILE_DENSE: &'static str = "./data/mod_dense.csv";
 
 fn main() {
+    // load the pca data for scrna
+    let mut scrna_pca_data = data_loader_pca("./data/pca_results_scrna.csv".to_string());
+    // load the pca data for spatial
+    let mut scrna_pca_data = data_loader_pca("./data/pca_results_spatial.csv".to_string());
+    // cluster scrna using pca axis 1 to 50
+
+    // match with sc3 output (rand index closest to 1)
+
+    // using the cluster centers 
+}
+
+fn em_with_mse(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut _cluster_weights: &mut Vec<f32>, pca_cell_data: &Vec<CellData2>, activated_dims: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
+    // vec to save the log loss for each cluster from each cell, to determine the one with least
+    let mut log_loss_final = vec![vec![]; pca_cell_data.len()];
+    let num_clusters = K;
+    let cell_count = pca_cell_data.len();
+    let mut last_log_loss = 0.0;
+    // update probs to update the cc
+    let mut update_prob: Vec<Vec<f32>> = Vec::new();
+    let mut update_weight: Vec<Vec<f32>> = Vec::new();
+    for cluster in 0..num_clusters {
+        update_prob.push(Vec::new());
+        update_weight.push(Vec::new());
+        for _index in 0..gene_count {
+            update_prob[cluster].push(0.0001);
+            update_weight[cluster].push(0.0);
+        }
+    }
+    // run 10 times and see
+    for run in 0..10 {
+        let mut log_poisson_total = 0.0;
+        // reset
+        reset_update_prob(num_clusters, gene_count, &mut update_prob, activated_dims);
+        for (celldex, cell) in pca_cell_data.iter().enumerate() {
+            // update this to mse loss
+            let log_mse = mse_loss(cell, &cluster_centers, &_cluster_weights, activated_dims);
+            log_loss_final[celldex] = log_mse.clone();
+            // sum up the total loss
+            log_poisson_total += log_sum_exp(&log_mse);
+            // update this to use mse loss
+            update_update_prob_mse(&mut update_prob, &mut update_weight, cell, &log_mse, cell_count, 1020.0, activated_dims);
+        }
+        //println!("BEFORE UPDATE CC {:?}", cluster_centers);
+        update_cluster_centers(gene_count, &update_prob, &mut cluster_centers, activated_dims);
+        // update the cluster weights, without this should be same as const prior
+        //update_cluster_weights(gene_count, &update_weight, &mut cluster_weights);
+        // display stuff
+        let log_loss_change = log_poisson_total - last_log_loss;
+        last_log_loss = log_poisson_total;
+        //println!("AFTER UPDATE CC {:?}", cluster_centers);
+    }
+    (log_loss_final, last_log_loss)
+}
+
+fn mse_loss(cell: &CellData2, cluster_centers: &Vec<Vec<f32>>, log_cluster_weight: &Vec<f32>, activated_dims: &Vec<bool>) -> Vec<f32>{
+    // to do
+    return vec![]
+}
+
+fn update_update_prob_mse (update_prob: &mut Vec<Vec<f32>>, update_weight: &mut Vec<Vec<f32>>, cell: &CellData2, log_poisson: &Vec<f32>, cell_count: usize, temp_step: f32, activated_dims: &Vec<bool>) {
+    // to do 
+}
+
+fn data_loader_pca(file_path: String) -> Vec<CellData2> {
+    println!("Start Data Loading");
+    let mut all_cell_data= vec![];
+    let pca_file = File::open(file_path).expect("cannot open data file");
+    let pca_data_reader = BufReader::new(&pca_file);
+    // skips the header
+    for (_line_index, line) in pca_data_reader.lines().enumerate().skip(1) {
+        let line = line.unwrap();
+        let values: Vec<&str> = line.split(',').collect();
+        let mut cell_data = CellData2::new(values.len() - 1);
+        for (gene_index, value) in values.iter().enumerate().skip(1) {
+            // convert to u32 and add to cell data
+            let read_count = value.to_string().parse::<f32>().unwrap();
+            cell_data.read_counts[gene_index] = read_count;
+        }
+        all_cell_data.push(cell_data)
+    }
+    all_cell_data
+}
+
+fn old_main() {
     let all_cell_data_original = data_loader_scrna(&mut StdRng::seed_from_u64(0));
     //let (all_cell_data_original, cell_ids) = data_loader_spatial();
     let mut best_total_loss = -f32::INFINITY;
-    let mut best_final_log_loss_vec;
+    let mut _best_final_log_loss_vec;
     // activated genes, use these genes
     let mut activated_genes = vec![true; all_cell_data_original[0].gene_count];
     for seed in 0..10_000 {
@@ -46,16 +130,12 @@ fn main() {
             string_vec.push(cell.cell_type);
         }
         if total_loss > best_total_loss {
-            best_final_log_loss_vec = log_loss_final;
+            _best_final_log_loss_vec = log_loss_final;
             best_total_loss = total_loss;
         }
         println!("current_best {}!!!", best_total_loss);
     }
     //data_writer(cell_ids, _best_final_log_loss);
-}
-
-fn check_variance_mean_genes () {
-    //if different use two ccs to find correct clustering
 }
 
 fn find_significant_genes (cluster_centers: &Vec<Vec<f32>>, activated_genes: &mut Vec<bool>, log_loss_final: &Vec<Vec<f32>>) {
@@ -102,7 +182,7 @@ fn find_significant_genes (cluster_centers: &Vec<Vec<f32>>, activated_genes: &mu
     }
 }
 
-fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, activated_genes: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
+fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut _cluster_weights: &mut Vec<f32>, all_cell_data: &Vec<CellData>, activated_genes: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; all_cell_data.len()];
     let num_clusters = K;
@@ -126,7 +206,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
         reset_update_prob(num_clusters, gene_count, &mut update_prob, activated_genes);
         for (celldex, cell) in all_cell_data.iter().enumerate() {
             // calculate poisson loss here // Modify with cluster weights
-            let log_poisson = poisson_loss(cell, &cluster_centers, &cluster_weights, activated_genes);
+            let log_poisson = poisson_loss(cell, &cluster_centers, &_cluster_weights, activated_genes);
             log_loss_final[celldex] = log_poisson.clone();
             // sum up the total loss
             log_poisson_total += log_sum_exp(&log_poisson);
@@ -162,7 +242,7 @@ fn em(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut cluster_we
         let rand_index = rand_index_calculator(&predicted, &ground_truth);
         println!("Rand Index {}\n", rand_index);
         for (index, cluster) in cluster_test.iter().enumerate() {
-            println!("Cluster {}\tweight:{}\tcells:{} ", index, cluster_weights[index].exp(), assigned_vec[index]);
+            println!("Cluster {}\tweight:{}\tcells:{} ", index, _cluster_weights[index].exp(), assigned_vec[index]);
             let mut counts = HashMap::new();
             for item in cluster {
                 *counts.entry(item).or_insert(0) += 1;
@@ -304,30 +384,6 @@ fn data_loader_scrna(rng: &mut StdRng) -> Vec<CellData> {
             None => {}
         }
     }
-    // write the filtered indices separately (dense and annotations), comment this out for real
-    // annotations
-    // println!("START WRITING FILTERED FOR SC3");
-    // let mut out_file = OpenOptions::new().create(true).append(true).open(OUT_FILE_ANNO).expect("cannot open output file");
-    // let anno_file = File::open(ANNO_FILE).expect("cannot open data file");
-    // let anno_data_reader = BufReader::new(&anno_file);
-    // for (line_index, line) in anno_data_reader.lines().enumerate() {
-    //     let line = line.unwrap();
-    //     if required_indices.contains(&(line_index - 1)) || line_index == 0 {
-    //         // write the line
-    //         writeln!(out_file, "{}", line).expect("failed to write line");
-    //     }
-    // }
-
-    // let mut out_file = OpenOptions::new().create(true).append(true).open(OUT_FILE_DENSE).expect("cannot open output file");
-    // let data_file = File::open(DENSE_FILE).expect("cannot open data file");
-    // let data_reader = BufReader::new(&data_file);
-    // for (line_index, line) in data_reader.lines().enumerate() {
-    //     let line = line.unwrap();
-    //     if required_indices.contains(&line_index) {
-    //         // write the line
-    //         writeln!(out_file, "{}", line).expect("failed to write line");
-    //     }
-    // }
     println!("{}", all_cell_data.len());
     // load the gene list
     println!("{}", all_cell_data[0].gene_count);
@@ -695,6 +751,22 @@ impl CellData {
     fn new(gene_count: usize) -> CellData {
         CellData{
             read_counts: vec![0; gene_count],
+            gene_count: gene_count,
+            cell_type: String::new()
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CellData2 {
+    read_counts: Vec<f32>,
+    gene_count: usize,
+    cell_type: String
+}
+impl CellData2 {
+    fn new(gene_count: usize) -> CellData2 {
+        CellData2{
+            read_counts: vec![0.0; gene_count],
             gene_count: gene_count,
             cell_type: String::new()
         }
