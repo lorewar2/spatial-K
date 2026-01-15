@@ -19,17 +19,28 @@ const OUT_FILE_DENSE: &'static str = "./data/mod_dense.csv";
 
 fn main() {
     // load the pca data for scrna
-    let mut scrna_pca_data = data_loader_pca("./data/pca_results_scrna.csv".to_string());
+    let scrna_pca_data = data_loader_pca("./data/pca_results_scrna.csv".to_string());
     // load the pca data for spatial
-    let mut scrna_pca_data = data_loader_pca("./data/pca_results_spatial.csv".to_string());
+    let spatial_pca_data = data_loader_pca("./data/pca_results_spatial.csv".to_string());
+    
     // cluster scrna using pca axis 1 to 50
-
-    // match with sc3 output (rand index closest to 1)
-
-    // using the cluster centers 
+    for seed in 0..100 {
+        let dim_used = 10;
+        // get some random cluster centers 
+        let mut cluster_centers = init_cluster_centers_uniform(dim_used, 6, seed);
+        let mut activated_dims = vec![false; scrna_pca_data[0].gene_count];
+        for index in 0..dim_used {
+            activated_dims[index] = true;
+        }
+        // em
+        em_with_mse(dim_used, &mut cluster_centers,&scrna_pca_data, &mut activated_dims);
+        // rand index with sc3 output
+        // match with sc3 output (rand index closest to 1)
+    }
+    // using the cluster centers, match the spatial cells
 }
 
-fn em_with_mse(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut _cluster_weights: &mut Vec<f32>, pca_cell_data: &Vec<CellData2>, activated_dims: &mut Vec<bool>) -> (Vec<Vec<f32>>, f32) {
+fn em_with_mse(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, pca_cell_data: &Vec<CellData2>, activated_dims: &Vec<bool>) -> (Vec<Vec<f32>>, f32) {
     // vec to save the log loss for each cluster from each cell, to determine the one with least
     let mut log_loss_final = vec![vec![]; pca_cell_data.len()];
     let num_clusters = K;
@@ -37,48 +48,78 @@ fn em_with_mse(gene_count: usize, mut cluster_centers: &mut Vec<Vec<f32>>, mut _
     let mut last_log_loss = 0.0;
     // update probs to update the cc
     let mut update_prob: Vec<Vec<f32>> = Vec::new();
-    let mut update_weight: Vec<Vec<f32>> = Vec::new();
     for cluster in 0..num_clusters {
         update_prob.push(Vec::new());
-        update_weight.push(Vec::new());
         for _index in 0..gene_count {
             update_prob[cluster].push(0.0001);
-            update_weight[cluster].push(0.0);
         }
     }
     // run 10 times and see
-    for run in 0..10 {
+    for run in 0..5 {
+        //println!("Before UPDATE CC {:?}", cluster_centers);
         let mut log_poisson_total = 0.0;
         // reset
         reset_update_prob(num_clusters, gene_count, &mut update_prob, activated_dims);
         for (celldex, cell) in pca_cell_data.iter().enumerate() {
             // update this to mse loss
-            let log_mse = mse_loss(cell, &cluster_centers, &_cluster_weights, activated_dims);
+            let log_mse = mse_loss(cell, &cluster_centers, activated_dims);
             log_loss_final[celldex] = log_mse.clone();
             // sum up the total loss
             log_poisson_total += log_sum_exp(&log_mse);
             // update this to use mse loss
-            update_update_prob_mse(&mut update_prob, &mut update_weight, cell, &log_mse, cell_count, 1020.0, activated_dims);
+            update_update_prob_mse(&mut update_prob, cell, &log_mse, cell_count, activated_dims);
         }
         //println!("BEFORE UPDATE CC {:?}", cluster_centers);
         update_cluster_centers(gene_count, &update_prob, &mut cluster_centers, activated_dims);
-        // update the cluster weights, without this should be same as const prior
-        //update_cluster_weights(gene_count, &update_weight, &mut cluster_weights);
         // display stuff
         let log_loss_change = log_poisson_total - last_log_loss;
         last_log_loss = log_poisson_total;
+        println!("\nMSE\trun:{}\tloss:{}\tchange:{}\n", run, log_poisson_total, log_loss_change);
         //println!("AFTER UPDATE CC {:?}", cluster_centers);
+        let mut assigned_vec: Vec<usize> = vec![0; num_clusters];
+        // Print stuff for testing
+        for (_index, final_log_probability) in log_loss_final.iter().enumerate() {
+            let index_of_max: usize = final_log_probability.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(index, _)| index).unwrap();
+            assigned_vec[index_of_max] += 1;
+        }
+        println!("cell assignment {:?}", assigned_vec);
     }
     (log_loss_final, last_log_loss)
 }
 
-fn mse_loss(cell: &CellData2, cluster_centers: &Vec<Vec<f32>>, log_cluster_weight: &Vec<f32>, activated_dims: &Vec<bool>) -> Vec<f32>{
-    // to do
-    return vec![]
+fn mse_loss(cell: &CellData2, cluster_centers: &Vec<Vec<f32>>, activated_dims: &Vec<bool>) -> Vec<f32> {
+    let mut scores: Vec<f32> = Vec::new();
+    for (_, center) in cluster_centers.iter().enumerate() {
+        let mut score: f32 = 0.0;
+        let mut activated_index = 0;
+        for (dim_index, value) in cell.read_counts.iter().enumerate() {
+            if activated_dims[dim_index] {
+                let diff = *value - center[activated_index];
+                score += diff * diff;
+                activated_index += 1;
+            }
+        }
+        scores.push(score.ln());
+    }
+    scores
 }
 
-fn update_update_prob_mse (update_prob: &mut Vec<Vec<f32>>, update_weight: &mut Vec<Vec<f32>>, cell: &CellData2, log_poisson: &Vec<f32>, cell_count: usize, temp_step: f32, activated_dims: &Vec<bool>) {
-    // to do 
+fn update_update_prob_mse(update_prob: &mut Vec<Vec<f32>>, cell: &CellData2, log_mse_loss: &Vec<f32>, cell_count: usize, activated_dims: &Vec<bool>) {
+    let mut activated_index = 0;
+    // normalization term
+    let sum = log_sum_exp(log_mse_loss);
+    for dim in 0..cell.gene_count {
+        if activated_dims[dim] {
+            for (cluster, score) in log_mse_loss.iter().enumerate() {
+                // normalize and turn "log-score" into probability-like weight
+                let update_prob_exp = ((0.0000001 + score - sum)).exp() / (cell_count as f32);
+                //println!("{}", score);
+                // accumulate weighted value
+                update_prob[cluster][activated_index] += update_prob_exp * cell.read_counts[dim];
+            }
+            activated_index += 1;
+        }
+    }
 }
 
 fn data_loader_pca(file_path: String) -> Vec<CellData2> {
@@ -91,7 +132,8 @@ fn data_loader_pca(file_path: String) -> Vec<CellData2> {
         let line = line.unwrap();
         let values: Vec<&str> = line.split(',').collect();
         let mut cell_data = CellData2::new(values.len() - 1);
-        for (gene_index, value) in values.iter().enumerate().skip(1) {
+        for (gene_index_2, value) in values.iter().enumerate().skip(1) {
+            let gene_index = gene_index_2 - 1;
             // convert to u32 and add to cell data
             let read_count = value.to_string().parse::<f32>().unwrap();
             cell_data.read_counts[gene_index] = read_count;
@@ -440,7 +482,7 @@ fn update_cluster_centers(gene_count: usize, update_prob: &Vec<Vec<f32>>, cluste
         if activated_genes[locus] {
             for cluster in 0..update_prob.len() {
                 let update = update_prob[cluster][activated_index];
-                cluster_centers[cluster][activated_index] = update.max(0.0).min(9.99);
+                cluster_centers[cluster][activated_index] = update.max(0.0).min(19.99);
             }
             activated_index += 1;
         }
@@ -500,7 +542,7 @@ fn init_cluster_centers_uniform(gene_count: usize, num_clusters: usize, seed: u6
     for cluster in 0..num_clusters {
         centers.push(Vec::new());
         for _ in 0..gene_count {
-            centers[cluster].push((rng.gen::<f32>() * 3.0).min(3.0).max(0.0001));
+            centers[cluster].push(((rng.gen::<f32>() * 20.0)).min(20.0).max(0.0));
         }
     }
     centers
