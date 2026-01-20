@@ -2,6 +2,7 @@
 import scanpy as sc
 from _consensus import consensus
 import pandas as pd
+from sklearn import mixture
 
 def main():
     # Load dataset
@@ -25,7 +26,7 @@ def main():
     sc.pp.log1p(adata_scrna)
     sc.pp.scale(adata_scrna)
     print("Scaled and logged")
-
+    
     # mark them 
     adata_scrna.obs['batch'] = 'scrna'
     adata_spatial.obs['batch'] = 'spatial'
@@ -46,27 +47,46 @@ def main():
     print(adata_spatial_pca)
     
     # run sc3 on both spatial and scrna
-    consensus(adata_scrna_pca, n_clusters = 6)
-    consensus(adata_spatial_pca, n_clusters = 6)
+    #consensus(adata_scrna_pca, n_clusters = 6)
+    #consensus(adata_spatial_pca, n_clusters = 6)
     print("Sc3 on scrna and spatial")
 
+    
     # save scrna sc3 result
-    adata_scrna_pca.obs['sc3s_6'].to_csv("./data/scrna_sc3_result.csv", index=False)
+    # adata_scrna_pca.obs['sc3s_6'].to_csv("./data/scrna_sc3_result.csv", index=False)
 
-    # save pca result for scrna
-    pca_df = pd.DataFrame(
-        adata_scrna_pca.obsm["X_pca"],
-        index=adata_scrna_pca.obs_names,
-        columns=[f"PC{i+1}" for i in range(adata_scrna_pca.obsm["X_pca"].shape[1])]
+    # # save pca result for scrna
+    # do gaussian mixture model clustering using different dimensions
+    #X_pca = adata_scrna_pca.obsm["X_pca"]
+    scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :20] 
+    spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :20] 
+    gmm = mixture.GaussianMixture(
+        n_components=6,
+        covariance_type="full",
+        random_state=0
     )
-    pca_df.to_csv("./data/pca_results_scrna.csv")
-    # save pca result for spatial
-    pca_df = pd.DataFrame(
-        adata_spatial_pca.obsm["X_pca"],
-        index=adata_spatial_pca.obs_names,
-        columns=[f"PC{i+1}" for i in range(adata_spatial_pca.obsm["X_pca"].shape[1])]
-    )
-    pca_df.to_csv("./data/pca_results_spatial.csv")
+
+    # Fit on PCA space
+    gmm.fit(scrna_X_pca)
+
+    # Predict cluster labels
+    labels = gmm.predict(scrna_X_pca)
+    print(labels)
+
+    labels = gmm.predict(spatial_X_pca)
+    for element in labels:
+        print(element)
+    # Save labels back to AnnData
+    #adata_scrna_pca.obs["gmm_clusters"] = labels.astype(str)
+    #print(adata_scrna_pca.obs["gmm_clusters"])
+    # pca_df.to_csv("./data/pca_results_scrna.csv")
+    # # save pca result for spatial
+    # pca_df = pd.DataFrame(
+    #     adata_spatial_pca.obsm["X_pca"],
+    #     index=adata_spatial_pca.obs_names,
+    #     columns=[f"PC{i+1}" for i in range(adata_spatial_pca.obsm["X_pca"].shape[1])]
+    # )
+    # pca_df.to_csv("./data/pca_results_spatial.csv")
 
 def get_common_indices():
     print("Getting common indices")
