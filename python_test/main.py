@@ -3,6 +3,7 @@ import scanpy as sc
 from _consensus import consensus
 import pandas as pd
 from sklearn import mixture
+from sklearn.metrics.cluster import adjusted_rand_score, rand_score
 
 def main():
     # Load dataset
@@ -47,19 +48,19 @@ def main():
     print(adata_spatial_pca)
     
     # run sc3 on both spatial and scrna
-    #consensus(adata_scrna_pca, n_clusters = 6)
-    #consensus(adata_spatial_pca, n_clusters = 6)
+    consensus(adata_scrna_pca, n_clusters = 6)
+    consensus(adata_spatial_pca, n_clusters = 6)
     print("Sc3 on scrna and spatial")
-
-    
+    sc3_scrna_result = adata_scrna_pca.obs['sc3s_6']
+    print(sc3_scrna_result)
     # save scrna sc3 result
     # adata_scrna_pca.obs['sc3s_6'].to_csv("./data/scrna_sc3_result.csv", index=False)
 
     # # save pca result for scrna
     # do gaussian mixture model clustering using different dimensions
     #X_pca = adata_scrna_pca.obsm["X_pca"]
-    scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :20] 
-    spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :20] 
+    scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :25] 
+    spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :25] 
     gmm = mixture.GaussianMixture(
         n_components=6,
         covariance_type="full",
@@ -71,11 +72,15 @@ def main():
 
     # Predict cluster labels
     labels = gmm.predict(scrna_X_pca)
-    print(labels)
+    for value in zip(labels, sc3_scrna_result):
+        print(value)
+    print(adjusted_rand_score(labels, sc3_scrna_result))
+    print(rand_score(labels, sc3_scrna_result))
+    #print(labels)
 
     labels = gmm.predict(spatial_X_pca)
-    for element in labels:
-        print(element)
+    #for element in labels:
+    #    print(element)
     # Save labels back to AnnData
     #adata_scrna_pca.obs["gmm_clusters"] = labels.astype(str)
     #print(adata_scrna_pca.obs["gmm_clusters"])
