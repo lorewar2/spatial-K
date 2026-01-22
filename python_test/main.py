@@ -1,11 +1,16 @@
 
 import scanpy as sc
+import numpy as np
 from _consensus import consensus
 import pandas as pd
 from sklearn import mixture
 from sklearn.metrics.cluster import adjusted_rand_score, rand_score
 
+np.random.seed(42)
+
 def main():
+    # Load ground truth
+    ground_truth_scrna = load_scrna_ground_truth()
     # Load dataset
     adata_scrna = sc.read_csv("./data/scrna_filtered.csv")
     adata_spatial = sc.read_csv("./data/spatial_data.csv")
@@ -52,33 +57,66 @@ def main():
     consensus(adata_spatial_pca, n_clusters = 6)
     print("Sc3 on scrna and spatial")
     sc3_scrna_result = adata_scrna_pca.obs['sc3s_6']
-    print(sc3_scrna_result)
+    sc3_spatial_result = adata_spatial_pca.obs['sc3s_6']
+    #print(sc3_scrna_result)
     # save scrna sc3 result
     # adata_scrna_pca.obs['sc3s_6'].to_csv("./data/scrna_sc3_result.csv", index=False)
 
     # # save pca result for scrna
     # do gaussian mixture model clustering using different dimensions
     #X_pca = adata_scrna_pca.obsm["X_pca"]
-    scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :25] 
-    spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :25] 
-    gmm = mixture.GaussianMixture(
-        n_components=6,
-        covariance_type="full",
-        random_state=0
-    )
+    print("sc3 ari with ground truth", adjusted_rand_score(sc3_scrna_result, ground_truth_scrna))
+    for pca_dim in range(49, 50):
+        scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :pca_dim] 
+        #spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :pca_dim] 
+        gmm = mixture.GaussianMixture(
+            n_components=6,
+            covariance_type="spherical",
+            random_state=0
+        )
 
-    # Fit on PCA space
-    gmm.fit(scrna_X_pca)
+        # Fit on PCA space
+        gmm.fit(scrna_X_pca)
+        # Predict cluster labels
+        labels = gmm.predict(scrna_X_pca)
+        #for value in zip(labels, sc3_scrna_result):
+        #    print(value)
+        print("pca_dim ", pca_dim)
+        print("scrna ari with sc3", adjusted_rand_score(labels, sc3_scrna_result))
+        print("scrna ari with ground truth", adjusted_rand_score(labels, ground_truth_scrna))
+        df = pd.DataFrame({
+            "label": labels,
+            "grount_truth": ground_truth_scrna
+        })
+        counts = pd.crosstab(df["label"], df["grount_truth"])
+        print(counts)
 
-    # Predict cluster labels
-    labels = gmm.predict(scrna_X_pca)
-    for value in zip(labels, sc3_scrna_result):
-        print(value)
-    print(adjusted_rand_score(labels, sc3_scrna_result))
-    print(rand_score(labels, sc3_scrna_result))
+        # spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :pca_dim] 
+        # labels = gmm.predict(spatial_X_pca)
+        # print("using old cc spatial ari with sc3", adjusted_rand_score(labels, sc3_spatial_result))
+        # Predict cluster labels
+        # gmm.fit(spatial_X_pca)
+        # labels = gmm.predict(spatial_X_pca)
+        # #for value in zip(labels, sc3_scrna_result):
+        # #    print(value)import pandas as pd
+        # print("relearned spatial ari with sc3", adjusted_rand_score(labels, sc3_spatial_result), "\n")
+
+        # Saving result
+        
+        df = pd.DataFrame(
+            scrna_X_pca,
+            columns=[f"PC{i+1}" for i in range(scrna_X_pca.shape[1])]
+        )
+        sc3_scrna_result = adata_scrna_pca.obs['sc3s_6'].to_numpy()
+        # Replace these with your real arrays
+        df["gau"] = labels
+        df["leiden"] = ground_truth_scrna
+        df["sc3"] = sc3_scrna_result
+
+        df.to_csv("scrna_pca_with_extra_cols.csv", index=False)
     #print(labels)
 
-    labels = gmm.predict(spatial_X_pca)
+    #labels = gmm.predict(spatial_X_pca)
     #for element in labels:
     #    print(element)
     # Save labels back to AnnData
@@ -92,6 +130,20 @@ def main():
     #     columns=[f"PC{i+1}" for i in range(adata_spatial_pca.obsm["X_pca"].shape[1])]
     # )
     # pca_df.to_csv("./data/pca_results_spatial.csv")
+
+def load_scrna_ground_truth():
+    ground_truth_array = []
+    known = []
+    with open("./data/mod_anno.csv", 'r', encoding="utf-8") as file:
+        for (index, line) in enumerate(file):
+            if index == 0:
+                continue
+            line_array = line.strip().split(",")
+            if line_array[-6].split("-")[0] not in known:
+                known.append(line_array[-6].split("-")[0])
+            ground_truth_array.append(known.index(line_array[-6].split("-")[0]))
+    print(len(known))
+    return ground_truth_array
 
 def get_common_indices():
     print("Getting common indices")
@@ -119,4 +171,5 @@ def get_common_indices():
 
 
 if __name__ == "__main__":
+    #load_scrna_ground_truth()
     main()
