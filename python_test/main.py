@@ -138,13 +138,17 @@ def load_scrna_ground_truth():
     with open("./data/NatGen2022_scRNAseq_annotations.csv", 'r', encoding="utf-8") as file:
         for (index, line) in enumerate(file):
             line_array = line.strip().split(",")
-            if index == 0 or len(line_array) != 116:
+            if index == 0:
                 continue
-            if line_array[-20] not in known:
-                known.append(line_array[-20])
-                known_count.append(0)
-            ground_truth_array.append(known.index(line_array[-20]))
-            known_count[known.index(line_array[-20])] += 1
+            if len(line_array) == 116:
+                if line_array[-20] not in known:
+                    known.append(line_array[-20])
+                    known_count.append(0)
+                ground_truth_array.append(known.index(line_array[-20]))
+                known_count[known.index(line_array[-20])] += 1
+            else:
+                known_count[-1] += 1
+                ground_truth_array.append(len(known) - 1)
     print(known)
     print(known_count)
     return ground_truth_array
