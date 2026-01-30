@@ -4,11 +4,12 @@ import numpy as np
 from _consensus import consensus
 import pandas as pd
 from sklearn import mixture
-from sklearn.metrics.cluster import adjusted_rand_score, rand_score
+from sklearn.metrics.cluster import adjusted_rand_score
 
 np.random.seed(42)
 
 def main():
+    number_of_components = 12
     # Load ground truth
     ground_truth_scrna = load_scrna_ground_truth()
     # Load dataset
@@ -53,8 +54,8 @@ def main():
     print(adata_spatial_pca)
     
     # run sc3 on both spatial and scrna
-    consensus(adata_scrna_pca, n_clusters = 6)
-    consensus(adata_spatial_pca, n_clusters = 6)
+    consensus(adata_scrna_pca, n_clusters = number_of_components)
+    consensus(adata_spatial_pca, n_clusters = number_of_components)
     print("Sc3 on scrna and spatial")
     sc3_scrna_result = adata_scrna_pca.obs['sc3s_6']
     sc3_spatial_result = adata_spatial_pca.obs['sc3s_6']
@@ -70,7 +71,7 @@ def main():
         scrna_X_pca = adata_scrna_pca.obsm["X_pca"][:, :pca_dim] 
         #spatial_X_pca = adata_spatial_pca.obsm["X_pca"][:, :pca_dim] 
         gmm = mixture.GaussianMixture(
-            n_components=6,
+            n_components=number_of_components,
             covariance_type="spherical",
             random_state=0
         )
@@ -107,7 +108,8 @@ def main():
             scrna_X_pca,
             columns=[f"PC{i+1}" for i in range(scrna_X_pca.shape[1])]
         )
-        sc3_scrna_result = adata_scrna_pca.obs['sc3s_6'].to_numpy()
+        saved_to = "sc3s_" + str(number_of_components)
+        sc3_scrna_result = adata_scrna_pca.obs[saved_to].to_numpy()
         # Replace these with your real arrays
         df["gau"] = labels
         df["leiden"] = ground_truth_scrna
@@ -135,17 +137,19 @@ def load_scrna_ground_truth():
     ground_truth_array = []
     known = []
     known_count = []
+    entry_to_retrieve = -5 # -20 broad cell type 
     with open("./data/NatGen2022_scRNAseq_annotations.csv", 'r', encoding="utf-8") as file:
         for (index, line) in enumerate(file):
             line_array = line.strip().split(",")
             if index == 0:
+                print(line_array[entry_to_retrieve])
                 continue
             if len(line_array) == 116:
-                if line_array[-20] not in known:
-                    known.append(line_array[-20])
+                if line_array[entry_to_retrieve] not in known:
+                    known.append(line_array[entry_to_retrieve])
                     known_count.append(0)
-                ground_truth_array.append(known.index(line_array[-20]))
-                known_count[known.index(line_array[-20])] += 1
+                ground_truth_array.append(known.index(line_array[entry_to_retrieve]))
+                known_count[known.index(line_array[entry_to_retrieve])] += 1
             else:
                 known_count[-1] += 1
                 ground_truth_array.append(len(known) - 1)
@@ -179,5 +183,5 @@ def get_common_indices():
 
 
 if __name__ == "__main__":
-    load_scrna_ground_truth()
-    #main()
+    #load_scrna_ground_truth()
+    main()
